@@ -1,0 +1,4 @@
+"""Visualization package for plots and graph exports."""
+from .plots import generate_all_plots
+
+__all__ = ["generate_all_plots"]

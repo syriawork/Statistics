@@ -1,0 +1,11 @@
+pandas>=1.0
+numpy
+scipy
+statsmodels
+openpyxl
+xlsxwriter
+reportlab
+streamlit
+matplotlib
+seaborn
+pillow

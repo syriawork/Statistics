@@ -1,0 +1,4 @@
+groups,test,pvalue,decision
+Control vs Treatment,Mann-Whitney U,0.02857142857142857,Reject
+Control vs Treatment2,Mann-Whitney U,0.02857142857142857,Reject
+Treatment vs Treatment2,Mann-Whitney U,0.02857142857142857,Reject
