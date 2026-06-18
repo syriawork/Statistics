@@ -9,7 +9,8 @@ import os
 import pandas as pd
 from reports.excel import generate_excel_report
 from reports.pdf import generate_pdf_report
-from stats_analysis.analysis import analyze_groups, remove_outliers_iqr
+from pharma_tools import calculate_process_capability
+from stats_analysis.analysis import analyze_groups, remove_outliers
 from visualization.plots import generate_all_plots
 
 
@@ -19,7 +20,16 @@ def parse_args():
     p.add_argument("--value", required=True, help="Column name for numeric values")
     p.add_argument("--group", required=True, help="Column name for group labels")
     p.add_argument("--alpha", type=float, default=0.05, help="Significance level (default 0.05)")
-    p.add_argument("--remove-outliers", action="store_true", help="Remove outliers by IQR per group")
+    p.add_argument(
+        "--outlier-method",
+        choices=['none', 'iqr', 'zscore', 'three-sigma', 'grubbs', 'dixon'],
+        default='none',
+        help="Outlier removal method to apply before analysis",
+    )
+    p.add_argument("--zscore-threshold", type=float, default=3.0, help="Z-score threshold for zscore outlier removal")
+    p.add_argument("--usl", type=float, default=None, help="Upper specification limit for Cp/CpK")
+    p.add_argument("--lsl", type=float, default=None, help="Lower specification limit for Cp/CpK")
+    p.add_argument("--paired", action="store_true", help="Use paired t-test / Wilcoxon for two-group analysis")
     p.add_argument("--out-report", default="report.csv", help="CSV file to write test report")
     p.add_argument(
         "--p-correction",
@@ -37,20 +47,51 @@ def main():
     args = parse_args()
     df = pd.read_csv(args.data)
 
-    if args.remove_outliers:
-        df, out_summary = remove_outliers_iqr(df, args.value, args.group)
-        print("Outlier removal summary:")
-        print(out_summary.to_string(index=False))
+    outlier_summary = None
+    if args.outlier_method != 'none':
+        df, out_summary = remove_outliers(
+            df,
+            args.value,
+            args.group,
+            method=args.outlier_method,
+            z_threshold=args.zscore_threshold,
+            alpha=args.alpha,
+        )
+        outlier_summary = out_summary
+        print(f"Outlier removal method: {args.outlier_method}")
+        if not out_summary.empty:
+            print("Outlier removal summary:")
+            print(out_summary.to_string(index=False))
 
     p_corr = None if args.p_correction == 'none' else args.p_correction
-    result = analyze_groups(df, args.value, args.group, alpha=args.alpha, p_correction=p_corr)
+    result = analyze_groups(
+        df,
+        args.value,
+        args.group,
+        alpha=args.alpha,
+        p_correction=p_corr,
+        paired=args.paired,
+    )
+    if outlier_summary is not None and not outlier_summary.empty:
+        result['outlier_summary'] = outlier_summary.to_dict(orient='records')
+        result['outlier_method'] = args.outlier_method
+
+    if args.usl is not None and args.lsl is not None:
+        if args.usl > args.lsl:
+            capability = calculate_process_capability(df[args.value].astype(float).dropna(), args.usl, args.lsl)
+            result['capability'] = capability
+            print(f"Cp/CpK computed with USL={args.usl} and LSL={args.lsl}")
+        else:
+            print('Warning: USL must be greater than LSL to compute Cp/CpK.')
 
     print("\nTest summary:")
     print(result.get('main_test', {}))
     if result.get('posthoc'):
         print("Pairwise tests:")
         for r in result['posthoc']:
-            print(f"  {r['groups']}: {r['test']} p={r.get('pvalue'):.4g} => {r.get('decision')}")
+            pvalue = r.get('pvalue')
+            p_str = f"{pvalue:.4g}" if pvalue is not None else 'None'
+            print(f"  {r['groups']}: {r['test']} p={p_str} => {r.get('decision')}")
 
     rows = []
     for r in result.get('posthoc', []):

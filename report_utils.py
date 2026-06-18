@@ -46,9 +46,13 @@ def generate_pdf_report(result, out_path):
     y -= 18
     c.setFont('Helvetica', 10)
     for p in result.get('pairwise', []):
-        line = f"{p.get('groups')} | {p.get('test')} | p={p.get('pvalue'):.4g}"
-        if 'pvalue_corrected' in p:
-            line += f" | p_corr={p.get('pvalue_corrected'):.4g} | {p.get('decision')}"
+        pvalue = p.get('pvalue')
+        p_corr = p.get('pvalue_corrected')
+        pvalue_str = f"{pvalue:.4g}" if pvalue is not None else 'None'
+        line = f"{p.get('groups')} | {p.get('test')} | p={pvalue_str}"
+        if p_corr is not None:
+            p_corr_str = f"{p_corr:.4g}"
+            line += f" | p_corr={p_corr_str} | {p.get('decision')}"
         else:
             line += f" | {p.get('decision')}"
         c.drawString(40, y, line)

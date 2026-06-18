@@ -1,4 +1,4 @@
-groups,test,pvalue,decision
-Control vs Treatment,Mann-Whitney U,0.02857142857142857,Reject
-Control vs Treatment2,Mann-Whitney U,0.02857142857142857,Reject
-Treatment vs Treatment2,Mann-Whitney U,0.02857142857142857,Reject
+groups,test,pvalue,pvalue_corrected,decision
+Control vs Treatment,Tukey HSD,0.0034,0.0034,Reject H0
+Control vs Treatment2,Tukey HSD,0.0,0.0,Reject H0
+Treatment vs Treatment2,Tukey HSD,0.0004,0.0004,Reject H0

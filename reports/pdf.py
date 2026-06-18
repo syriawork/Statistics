@@ -86,7 +86,31 @@ def generate_pdf_report(result: dict, out_path: str, plot_paths: Optional[List[s
         story.append(Paragraph(f"{label.replace('_', ' ').title()}: {_safe_str(value)}", styles['BodyText']))
     story.append(Spacer(1, 12))
 
-    story.append(Paragraph('6. Confidence Intervals', styles['Heading2']))
+    if result.get('outlier_summary'):
+        story.append(Paragraph('6. Outlier Summary', styles['Heading2']))
+        data = [['Group', 'N Before', 'N After', 'Removed', 'Last Outlier Value', 'Statistic', 'Critical', 'Rejected']]
+        for row in result['outlier_summary']:
+            data.append([
+                _safe_str(row.get('group')),
+                _safe_str(row.get('n_before')),
+                _safe_str(row.get('n_after')),
+                _safe_str(row.get('removed')),
+                _safe_str(row.get('last_outlier_value')),
+                _safe_str(row.get('last_statistic')),
+                _safe_str(row.get('last_critical_value')),
+                _safe_str(row.get('last_rejected')),
+            ])
+        story.append(_build_table(data, [3 * cm, 1.5 * cm, 1.5 * cm, 1.5 * cm, 2 * cm, 2 * cm, 2 * cm, 1.5 * cm]))
+        story.append(Spacer(1, 12))
+
+    if result.get('capability'):
+        story.append(Paragraph('7. Process Capability', styles['Heading2']))
+        capability = result['capability']
+        for label, value in capability.items():
+            story.append(Paragraph(f"{label.replace('_', ' ').title()}: {_safe_str(value)}", styles['BodyText']))
+        story.append(Spacer(1, 12))
+
+    story.append(Paragraph('8. Confidence Intervals', styles['Heading2']))
     ci = main_test.get('confidence_interval', {})
     story.append(Paragraph(f"Mean difference: {_safe_str(ci.get('mean_diff'))}", styles['BodyText']))
     story.append(Paragraph(f"95% CI: {_safe_str(ci.get('lower_ci'))} to {_safe_str(ci.get('upper_ci'))}", styles['BodyText']))

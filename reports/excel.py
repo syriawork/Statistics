@@ -8,10 +8,11 @@ def _auto_adjust_column_width(writer: ExcelWriter, sheet_name: str, df: pd.DataF
     workbook = writer.book
     worksheet = writer.sheets[sheet_name]
     for idx, col in enumerate(df.columns):
-        max_len = max(
-            df[col].astype(str).map(len).max() if not df[col].empty else 0,
-            len(col),
-        ) + 2
+        values = [str(x) for x in df[col].dropna().tolist() if x is not None]
+        if values:
+            max_len = max([len(v) for v in values] + [len(str(col))]) + 2
+        else:
+            max_len = len(str(col)) + 2
         worksheet.set_column(idx, idx, max_len)
 
 
@@ -84,10 +85,21 @@ def generate_excel_report(result: dict, df: pd.DataFrame, out_path: str) -> None
                 'observations': int(sum(values.get('n', 0) for values in result.get('descriptive', {}).values())),
                 'main_test': main_test.get('test'),
                 'decision': main_test.get('decision'),
+                'outlier_method': result.get('outlier_method'),
             }
         ])
         summary.to_excel(writer, sheet_name='Summary', index=False)
         _auto_adjust_column_width(writer, 'Summary', summary)
+
+        if result.get('outlier_summary'):
+            outlier_df = pd.DataFrame(result['outlier_summary'])
+            outlier_df.to_excel(writer, sheet_name='Outlier Summary', index=False)
+            _auto_adjust_column_width(writer, 'Outlier Summary', outlier_df)
+
+        if result.get('capability'):
+            capability_df = pd.DataFrame([result['capability']])
+            capability_df.to_excel(writer, sheet_name='Process Capability', index=False)
+            _auto_adjust_column_width(writer, 'Process Capability', capability_df)
 
         df.to_excel(writer, sheet_name='Raw Data', index=False)
         _auto_adjust_column_width(writer, 'Raw Data', df)

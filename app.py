@@ -3,9 +3,10 @@ import tempfile
 
 import pandas as pd
 import streamlit as st
+from pharma_tools import calculate_process_capability
 from reports.excel import generate_excel_report
 from reports.pdf import generate_pdf_report
-from stats_analysis.analysis import analyze_groups, remove_outliers_iqr
+from stats_analysis.analysis import analyze_groups, remove_outliers
 from visualization.plots import generate_all_plots
 
 st.title('Biostat Decision Tool')
@@ -20,18 +21,38 @@ if uploaded is not None:
     value_col = st.selectbox('Value column', cols)
     group_col = st.selectbox('Group column', cols)
     alpha = st.number_input('Alpha', value=0.05, step=0.01)
-    remove_out = st.checkbox('Remove outliers (IQR)')
+    outlier_method = st.selectbox('Outlier removal method', ['none', 'iqr', 'zscore', 'three-sigma', 'grubbs', 'dixon'])
+    zscore_threshold = st.number_input('Z-score threshold', value=3.0, step=0.1)
+    paired = st.checkbox('Paired samples (paired t-test / Wilcoxon)')
+    calculate_capability = st.checkbox('Calculate Cp/CpK')
+    usl = None
+    lsl = None
+    if calculate_capability:
+        usl = st.number_input('USL', value=0.0, step=0.1)
+        lsl = st.number_input('LSL', value=0.0, step=0.1)
     p_corr = st.selectbox('P-value correction', ['none', 'bonferroni', 'holm', 'fdr_bh'])
 
     if st.button('Run analysis'):
         d = df.copy()
-        if remove_out:
-            d, summary = remove_outliers_iqr(d, value_col, group_col)
+        if outlier_method != 'none':
+            d, summary = remove_outliers(d, value_col, group_col, method=outlier_method, z_threshold=zscore_threshold)
             st.markdown('### Outlier removal summary')
             st.dataframe(summary)
 
         p_corr_arg = None if p_corr == 'none' else p_corr
-        result = analyze_groups(d, value_col, group_col, alpha=alpha, p_correction=p_corr_arg)
+        result = analyze_groups(
+            d,
+            value_col,
+            group_col,
+            alpha=alpha,
+            p_correction=p_corr_arg,
+            paired=paired,
+        )
+        if calculate_capability and usl is not None and lsl is not None and usl > lsl:
+            capability = calculate_process_capability(d[value_col].astype(float).dropna(), usl, lsl)
+            result['capability'] = capability
+        elif calculate_capability:
+            st.warning('USL must be greater than LSL to calculate Cp/CpK.')
 
         st.markdown('## Analysis Results')
         st.markdown('### Descriptive Statistics')
@@ -53,6 +74,15 @@ if uploaded is not None:
             st.dataframe(pd.DataFrame(posthoc))
         else:
             st.write('No post-hoc comparisons performed.')
+
+        if result.get('outlier_summary'):
+            st.markdown('### Outlier Summary')
+            st.dataframe(pd.DataFrame(result['outlier_summary']))
+            st.markdown(f"**Outlier method:** {result.get('outlier_method')}" )
+
+        if result.get('capability'):
+            st.markdown('### Process Capability')
+            st.write(result['capability'])
 
         st.markdown('### Interpretation')
         st.write(result.get('interpretation', ''))

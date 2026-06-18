@@ -20,7 +20,9 @@ def generate_interpretation(result: Dict[str, object]) -> str:
     if levene_p is not None:
         lines.append(f"Variance homogeneity was evaluated by Levene's test (p = {levene_p:.4f}).")
 
-    lines.append(f"The main test applied was {main_test.get('test')}. The resulting p-value was {main_test.get('pvalue'):.4g}.")
+    main_pvalue = main_test.get('pvalue')
+    main_pvalue_str = f"{main_pvalue:.4g}" if main_pvalue is not None else 'None'
+    lines.append(f"The main test applied was {main_test.get('test')}. The resulting p-value was {main_pvalue_str}.")
     lines.append(f"Decision: {main_test.get('decision')}.")
     interpretation = main_test.get('interpretation')
     if interpretation:

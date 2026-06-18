@@ -38,6 +38,13 @@ def remove_outliers_iqr(df: pd.DataFrame, value_col: str, group_col: str) -> Tup
     return clean, pd.DataFrame(summary)
 
 
+def _mode_value(series: pd.Series) -> Optional[float]:
+    mode_vals = series.mode()
+    if mode_vals.empty:
+        return None
+    return float(mode_vals.iloc[0])
+
+
 def _describe_series(series: pd.Series) -> Dict[str, Optional[float]]:
     n = int(series.count())
     mean = float(series.mean()) if n else None
@@ -49,15 +56,261 @@ def _describe_series(series: pd.Series) -> Dict[str, Optional[float]]:
     return {
         'n': n,
         'mean': mean,
+        'mode': _mode_value(series) if n else None,
         'median': float(series.median()) if n else None,
         'std': std,
+        'variance': float(series.var(ddof=1)) if n else None,
         'sem': sem,
         'min': float(series.min()) if n else None,
         'max': float(series.max()) if n else None,
+        'range': float(series.max() - series.min()) if n else None,
         'cv_pct': float(std / mean * 100) if n and mean not in (0, None) else None,
+        'skewness': float(stats.skew(series, bias=False)) if n > 2 else None,
+        'kurtosis': float(stats.kurtosis(series, fisher=True, bias=False)) if n > 3 else None,
         'q1': q1,
         'q3': q3,
         'iqr': iqr,
+    }
+
+
+def _numeric_series(series: pd.Series) -> pd.Series:
+    return pd.to_numeric(series, errors='coerce').dropna()
+
+
+def z_score_outlier_mask(series: pd.Series, threshold: float = 3.0) -> pd.Series:
+    numeric = _numeric_series(series)
+    if numeric.empty:
+        return pd.Series([], dtype=bool)
+    z_scores = np.abs((numeric - numeric.mean()) / numeric.std(ddof=1))
+    return z_scores > threshold
+
+
+def three_sigma_outlier_mask(series: pd.Series) -> pd.Series:
+    numeric = _numeric_series(series)
+    if numeric.empty:
+        return pd.Series([], dtype=bool)
+    mean = numeric.mean()
+    std = numeric.std(ddof=1)
+    lower = mean - 3 * std
+    upper = mean + 3 * std
+    return ~numeric.between(lower, upper)
+
+
+def remove_outliers_zscore(df: pd.DataFrame, value_col: str, group_col: str, threshold: float = 3.0) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    frames: List[pd.DataFrame] = []
+    summary: List[Dict[str, object]] = []
+    for g, sub in df.groupby(group_col, observed=True):
+        numeric = pd.to_numeric(sub[value_col], errors='coerce')
+        mask = ~z_score_outlier_mask(numeric, threshold)
+        removed = (~mask.fillna(False)).sum()
+        summary.append({
+            'group': g,
+            'n_before': int(len(sub)),
+            'n_after': int(mask.sum()),
+            'removed': int(removed),
+            'threshold': threshold,
+        })
+        frames.append(sub.loc[mask.fillna(False)])
+    clean = pd.concat(frames, ignore_index=True)
+    return clean, pd.DataFrame(summary)
+
+
+def remove_outliers_three_sigma(df: pd.DataFrame, value_col: str, group_col: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    frames: List[pd.DataFrame] = []
+    summary: List[Dict[str, object]] = []
+    for g, sub in df.groupby(group_col, observed=True):
+        numeric = pd.to_numeric(sub[value_col], errors='coerce')
+        mask = ~three_sigma_outlier_mask(numeric)
+        removed = (~mask.fillna(False)).sum()
+        summary.append({
+            'group': g,
+            'n_before': int(len(sub)),
+            'n_after': int(mask.sum()),
+            'removed': int(removed),
+        })
+        frames.append(sub.loc[mask.fillna(False)])
+    clean = pd.concat(frames, ignore_index=True)
+    return clean, pd.DataFrame(summary)
+
+
+def remove_outliers_grubbs(
+    df: pd.DataFrame,
+    value_col: str,
+    group_col: str,
+    alpha: float = 0.05,
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    frames: List[pd.DataFrame] = []
+    summary: List[Dict[str, object]] = []
+    for g, sub in df.groupby(group_col, observed=True):
+        current = sub.copy()
+        removed_count = 0
+        last_detection: Dict[str, Optional[object]] = {}
+        while True:
+            numeric = pd.to_numeric(current[value_col], errors='coerce')
+            result = detect_grubbs_outlier(numeric, alpha)
+            if not result['rejected'] or result['outlier_index'] is None:
+                break
+            mask = numeric.index != result['outlier_index']
+            current = current.loc[mask]
+            removed_count += 1
+            last_detection = result
+            if len(current) < 3:
+                break
+        summary.append({
+            'group': g,
+            'n_before': int(len(sub)),
+            'n_after': int(len(current)),
+            'removed': int(removed_count),
+            'last_outlier_value': last_detection.get('outlier_value'),
+            'last_statistic': last_detection.get('statistic'),
+            'last_critical_value': last_detection.get('critical_value'),
+            'last_rejected': last_detection.get('rejected', False),
+        })
+        frames.append(current)
+    clean = pd.concat(frames, ignore_index=True)
+    return clean, pd.DataFrame(summary)
+
+
+def remove_outliers_dixon(
+    df: pd.DataFrame,
+    value_col: str,
+    group_col: str,
+    alpha: float = 0.05,
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    frames: List[pd.DataFrame] = []
+    summary: List[Dict[str, object]] = []
+    for g, sub in df.groupby(group_col, observed=True):
+        current = sub.copy()
+        removed_count = 0
+        last_detection: Dict[str, Optional[object]] = {}
+        while True:
+            numeric = pd.to_numeric(current[value_col], errors='coerce')
+            result = detect_dixon_outlier(numeric)
+            if not result['rejected'] or result['outlier_index'] is None:
+                break
+            mask = numeric.index != result['outlier_index']
+            current = current.loc[mask]
+            removed_count += 1
+            last_detection = result
+            if len(current) < 3:
+                break
+        summary.append({
+            'group': g,
+            'n_before': int(len(sub)),
+            'n_after': int(len(current)),
+            'removed': int(removed_count),
+            'last_outlier_value': last_detection.get('outlier_value'),
+            'last_statistic': last_detection.get('statistic'),
+            'last_critical_value': last_detection.get('critical_value'),
+            'last_rejected': last_detection.get('rejected', False),
+        })
+        frames.append(current)
+    clean = pd.concat(frames, ignore_index=True)
+    return clean, pd.DataFrame(summary)
+
+
+def remove_outliers(
+    df: pd.DataFrame,
+    value_col: str,
+    group_col: str,
+    method: str = 'iqr',
+    z_threshold: float = 3.0,
+    alpha: float = 0.05,
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    method = method.lower()
+    if method == 'none':
+        return df.copy(), pd.DataFrame([])
+    if method == 'iqr':
+        return remove_outliers_iqr(df, value_col, group_col)
+    if method == 'zscore':
+        return remove_outliers_zscore(df, value_col, group_col, threshold=z_threshold)
+    if method == 'three-sigma':
+        return remove_outliers_three_sigma(df, value_col, group_col)
+    if method == 'grubbs':
+        return remove_outliers_grubbs(df, value_col, group_col, alpha=alpha)
+    if method == 'dixon':
+        return remove_outliers_dixon(df, value_col, group_col, alpha=alpha)
+    raise ValueError(f"Unsupported outlier removal method: {method}")
+
+
+def detect_grubbs_outlier(series: pd.Series, alpha: float = 0.05) -> Dict[str, Optional[object]]:
+    numeric = _numeric_series(series)
+    n = len(numeric)
+    if n < 3:
+        return {'outlier_index': None, 'outlier_value': None, 'statistic': None, 'critical_value': None, 'rejected': False}
+    mean_value = numeric.mean()
+    std_value = numeric.std(ddof=1)
+    deviations = np.abs(numeric - mean_value)
+    outlier_index = int(deviations.idxmax())
+    outlier_value = float(numeric.loc[outlier_index])
+    g_stat = float(deviations.max() / std_value)
+    t_crit = stats.t.ppf(1 - alpha / (2 * n), n - 2)
+    g_crit = float(((n - 1) / math.sqrt(n)) * math.sqrt(t_crit ** 2 / (n - 2 + t_crit ** 2)))
+    return {
+        'outlier_index': outlier_index,
+        'outlier_value': outlier_value,
+        'statistic': g_stat,
+        'critical_value': g_crit,
+        'rejected': g_stat > g_crit,
+    }
+
+
+_DIXON_CRITICAL_VALUES = {
+    3: 0.941,
+    4: 0.765,
+    5: 0.642,
+    6: 0.560,
+    7: 0.507,
+    8: 0.468,
+    9: 0.437,
+    10: 0.412,
+    11: 0.392,
+    12: 0.376,
+    13: 0.361,
+    14: 0.349,
+    15: 0.338,
+    16: 0.329,
+    17: 0.320,
+    18: 0.313,
+    19: 0.305,
+    20: 0.299,
+    21: 0.294,
+    22: 0.289,
+    23: 0.284,
+    24: 0.279,
+    25: 0.276,
+}
+
+
+def detect_dixon_outlier(series: pd.Series) -> Dict[str, Optional[object]]:
+    numeric = _numeric_series(series)
+    n = len(numeric)
+    if n < 3 or n > 25:
+        return {'outlier_index': None, 'outlier_value': None, 'statistic': None, 'critical_value': None, 'rejected': False}
+    sorted_values = numeric.sort_values()
+    x1 = sorted_values.iloc[0]
+    x2 = sorted_values.iloc[1]
+    xn = sorted_values.iloc[-1]
+    xn1 = sorted_values.iloc[-2]
+    q_low = float((x2 - x1) / (xn - x1)) if xn != x1 else float('nan')
+    q_high = float((xn - xn1) / (xn - x1)) if xn != x1 else float('nan')
+    critical = _DIXON_CRITICAL_VALUES.get(n)
+    if critical is None:
+        return {'outlier_index': None, 'outlier_value': None, 'statistic': None, 'critical_value': None, 'rejected': False}
+    if q_low > q_high:
+        outlier_value = float(x1)
+        outlier_index = int(sorted_values.index[0])
+        statistic = q_low
+    else:
+        outlier_value = float(xn)
+        outlier_index = int(sorted_values.index[-1])
+        statistic = q_high
+    return {
+        'outlier_index': outlier_index,
+        'outlier_value': outlier_value,
+        'statistic': statistic,
+        'critical_value': critical,
+        'rejected': statistic > critical,
     }
 
 
@@ -81,6 +334,21 @@ def _following_ttest_ci(
         df = (var1 / n1 + var2 / n2) ** 2 / (
             (var1 / n1) ** 2 / (n1 - 1) + (var2 / n2) ** 2 / (n2 - 1)
         )
+    t_crit = stats.t.ppf(1 - alpha / 2, df)
+    lower = mean_diff - t_crit * se
+    upper = mean_diff + t_crit * se
+    return mean_diff, float(lower), float(upper)
+
+
+def _paired_ttest_ci(a: np.ndarray, b: np.ndarray, alpha: float) -> Tuple[float, float, float]:
+    diffs = a - b
+    mean_diff = float(np.mean(diffs))
+    sd_diff = float(np.std(diffs, ddof=1))
+    n = len(diffs)
+    if n < 2 or sd_diff == 0:
+        return float(mean_diff), float('nan'), float('nan')
+    se = sd_diff / math.sqrt(n)
+    df = n - 1
     t_crit = stats.t.ppf(1 - alpha / 2, df)
     lower = mean_diff - t_crit * se
     upper = mean_diff + t_crit * se
@@ -216,6 +484,7 @@ def _tukey_posthoc(df: pd.DataFrame, value_col: str, group_col: str, alpha: floa
             'groups': f"{g1} vs {g2}",
             'test': 'Tukey HSD',
             'mean_diff': float(meandiff),
+            'pvalue': float(p_adj),
             'pvalue_corrected': float(p_adj),
             'lower_ci': float(lower),
             'upper_ci': float(upper),
@@ -243,6 +512,7 @@ def analyze_groups(
     group_col: str,
     alpha: float = 0.05,
     p_correction: Optional[str] = None,
+    paired: bool = False,
 ) -> Dict[str, object]:
     """Analyze groups with assumptions, main test, post-hoc, effect size, and interpretation."""
     if value_col not in df.columns or group_col not in df.columns:
@@ -299,6 +569,43 @@ def analyze_groups(
         names = list(groups.keys())
         a = groups[names[0]]
         b = groups[names[1]]
+        if paired:
+            if len(a) != len(b):
+                raise ValueError('Paired t-test requires equal sample sizes for both groups.')
+            diffs = a - b
+            test_name = 'paired t-test'
+            all_normal_diffs = len(diffs) >= 3 and float(stats.shapiro(diffs)[1]) >= alpha
+            if all_normal_diffs:
+                try:
+                    tstat, pvalue = stats.ttest_rel(a, b)
+                except Exception:
+                    pvalue = 1.0
+            else:
+                try:
+                    tstat, pvalue = stats.wilcoxon(a, b)
+                    test_name = 'Wilcoxon signed-rank'
+                except Exception:
+                    pvalue = 1.0
+            mean_diff, lower_ci, upper_ci = _paired_ttest_ci(a, b, alpha)
+            effect = {
+                'paired_cohens_d': _safe_float(np.mean(diffs) / np.std(diffs, ddof=1)) if len(diffs) > 1 else None,
+                'effect_size_label': _effect_size_label(_safe_float(np.mean(diffs) / np.std(diffs, ddof=1)) if len(diffs) > 1 else None),
+            }
+            ci = {'mean_diff': float(mean_diff), 'lower_ci': lower_ci, 'upper_ci': upper_ci}
+            decision, interpretation = _format_decision(float(pvalue), alpha)
+            result['main_test'] = {
+                'test': test_name,
+                'pvalue': float(pvalue),
+                'decision': decision,
+                'interpretation': interpretation,
+                'paired': True,
+                'confidence_interval': ci,
+                'effect_size': effect,
+            }
+            result['posthoc'] = []
+            result['interpretation'] = generate_interpretation(result)
+            return result
+
         equal_var = levene_p is not None and levene_p >= alpha
         if normality.get(names[0], 0) is not None and normality.get(names[1], 0) is not None:
             test_name = 't-test' if equal_var else 'Welch t-test'
