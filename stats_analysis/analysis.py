@@ -11,12 +11,19 @@ from statsmodels.stats.multicomp import pairwise_tukeyhsd
 from utilities.interpretation import generate_interpretation
 
 
+def _ensure_series(data: pd.Series | pd.DataFrame) -> pd.Series:
+    """Convert DataFrame to Series if necessary (handles duplicate column names)."""
+    if isinstance(data, pd.DataFrame):
+        return data.iloc[:, 0]
+    return data
+
+
 def remove_outliers_iqr(df: pd.DataFrame, value_col: str, group_col: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """Remove outliers per group using the IQR rule."""
     frames: List[pd.DataFrame] = []
     summary: List[Dict[str, object]] = []
     for g, sub in df.groupby(group_col, observed=True):
-        numeric = pd.to_numeric(sub[value_col], errors='coerce')
+        numeric = pd.to_numeric(_ensure_series(sub[value_col]), errors='coerce')
         q1 = numeric.quantile(0.25)
         q3 = numeric.quantile(0.75)
         iqr = q3 - q1
@@ -100,7 +107,7 @@ def remove_outliers_zscore(df: pd.DataFrame, value_col: str, group_col: str, thr
     frames: List[pd.DataFrame] = []
     summary: List[Dict[str, object]] = []
     for g, sub in df.groupby(group_col, observed=True):
-        numeric = pd.to_numeric(sub[value_col], errors='coerce')
+        numeric = pd.to_numeric(_ensure_series(sub[value_col]), errors='coerce')
         mask = ~z_score_outlier_mask(numeric, threshold)
         removed = (~mask.fillna(False)).sum()
         summary.append({
@@ -119,7 +126,7 @@ def remove_outliers_three_sigma(df: pd.DataFrame, value_col: str, group_col: str
     frames: List[pd.DataFrame] = []
     summary: List[Dict[str, object]] = []
     for g, sub in df.groupby(group_col, observed=True):
-        numeric = pd.to_numeric(sub[value_col], errors='coerce')
+        numeric = pd.to_numeric(_ensure_series(sub[value_col]), errors='coerce')
         mask = ~three_sigma_outlier_mask(numeric)
         removed = (~mask.fillna(False)).sum()
         summary.append({
@@ -146,7 +153,7 @@ def remove_outliers_grubbs(
         removed_count = 0
         last_detection: Dict[str, Optional[object]] = {}
         while True:
-            numeric = pd.to_numeric(current[value_col], errors='coerce')
+            numeric = pd.to_numeric(_ensure_series(current[value_col]), errors='coerce')
             result = detect_grubbs_outlier(numeric, alpha)
             if not result['rejected'] or result['outlier_index'] is None:
                 break
@@ -184,7 +191,7 @@ def remove_outliers_dixon(
         removed_count = 0
         last_detection: Dict[str, Optional[object]] = {}
         while True:
-            numeric = pd.to_numeric(current[value_col], errors='coerce')
+            numeric = pd.to_numeric(_ensure_series(current[value_col]), errors='coerce')
             result = detect_dixon_outlier(numeric)
             if not result['rejected'] or result['outlier_index'] is None:
                 break
@@ -423,7 +430,10 @@ def _anova_effect_sizes(groups: Dict[str, np.ndarray]) -> Dict[str, Optional[flo
 
 def _dunn_posthoc(df: pd.DataFrame, value_col: str, group_col: str, alpha: float, correction: str) -> List[Dict[str, object]]:
     df = df[[value_col, group_col]].dropna()
-    df[value_col] = pd.to_numeric(df[value_col], errors='coerce')
+    value_data = df[value_col]
+    if isinstance(value_data, pd.DataFrame):
+        value_data = value_data.iloc[:, 0]
+    df[value_col] = pd.to_numeric(value_data, errors='coerce')
     df = df.dropna()
     groups = df.groupby(group_col, observed=True)
     ranked = stats.rankdata(df[value_col])
@@ -470,7 +480,10 @@ def _dunn_posthoc(df: pd.DataFrame, value_col: str, group_col: str, alpha: float
 
 def _tukey_posthoc(df: pd.DataFrame, value_col: str, group_col: str, alpha: float) -> List[Dict[str, object]]:
     df = df[[value_col, group_col]].dropna()
-    df[value_col] = pd.to_numeric(df[value_col], errors='coerce')
+    value_data = df[value_col]
+    if isinstance(value_data, pd.DataFrame):
+        value_data = value_data.iloc[:, 0]
+    df[value_col] = pd.to_numeric(value_data, errors='coerce')
     df = df.dropna()
     try:
         tukey = pairwise_tukeyhsd(endog=df[value_col], groups=df[group_col], alpha=alpha)
@@ -518,14 +531,47 @@ def analyze_groups(
     if value_col not in df.columns or group_col not in df.columns:
         raise ValueError('Selected value or group column is not present in the DataFrame.')
 
-    df = df[[value_col, group_col]].copy()
-    df[value_col] = pd.to_numeric(df[value_col], errors='coerce')
-    df = df.dropna(subset=[value_col, group_col])
+    # Select only the required columns to avoid issues with duplicate column names
+    # If there are duplicates, select the first occurrence
+    value_loc = df.columns.get_loc(value_col)
+    group_loc = df.columns.get_loc(group_col)
+    
+    # Convert slice or array to int (get first index)
+    if isinstance(value_loc, slice):
+        value_idx = value_loc.start
+    elif isinstance(value_loc, np.ndarray):
+        value_idx = np.where(value_loc)[0][0]
+    else:
+        value_idx = value_loc
+        
+    if isinstance(group_loc, slice):
+        group_idx = group_loc.start
+    elif isinstance(group_loc, np.ndarray):
+        group_idx = np.where(group_loc)[0][0]
+    else:
+        group_idx = group_loc
+    
+    # Create new DataFrame with unique column names, avoiding duplicates
+    new_col_name_value = '__selected_value__'
+    new_col_name_group = '__selected_group__'
+    df = pd.DataFrame({
+        new_col_name_value: df.iloc[:, value_idx].values,
+        new_col_name_group: df.iloc[:, group_idx].values
+    })
+    # Now we can safely use the column names since they're unique
+    value_col_internal = new_col_name_value
+    group_col_internal = new_col_name_group
+    
+    df[value_col_internal] = pd.to_numeric(df[value_col_internal], errors='coerce')
+    df = df.dropna(subset=[value_col_internal, group_col_internal])
     if df.empty:
         raise ValueError('No valid numeric observations found after cleaning the selected columns.')
 
-    groups = {g: grp[value_col].astype(float).to_numpy() for g, grp in df.groupby(group_col, observed=True)}
+    groups = {g: grp[value_col_internal].astype(float).to_numpy() for g, grp in df.groupby(group_col_internal, observed=True)}
     descriptive = {g: _describe_series(pd.Series(values)) for g, values in groups.items()}
+    
+    # For post-hoc tests, use the internal column names to avoid issues with duplicate names
+    # The functions will handle the data correctly
     normality: Dict[str, Optional[float]] = {}
     for g, values in groups.items():
         if len(values) < 3 or len(values) > 5000:
@@ -655,7 +701,7 @@ def analyze_groups(
             pvalue = 1.0
         test_name = 'ANOVA'
         effect = _anova_effect_sizes(groups)
-        posthoc = _tukey_posthoc(df, value_col, group_col, alpha)
+        posthoc = _tukey_posthoc(df, value_col_internal, group_col_internal, alpha)
     else:
         try:
             hstat, pvalue = stats.kruskal(*groups.values())
@@ -665,7 +711,7 @@ def analyze_groups(
         effect = {'eta_squared': None, 'omega_squared': None}
         correction = p_correction or 'bonferroni'
         correction = 'fdr_bh' if correction == 'fdr_bh' else correction
-        posthoc = _dunn_posthoc(df, value_col, group_col, alpha, correction)
+        posthoc = _dunn_posthoc(df, value_col_internal, group_col_internal, alpha, correction)
 
     decision, interpretation = _format_decision(float(pvalue), alpha)
     result['main_test'] = {
