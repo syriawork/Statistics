@@ -120,7 +120,7 @@ if uploaded is not None:
         plot_dir = tempfile.mkdtemp(prefix='plots_')
         plot_paths = generate_all_plots(d, value_col, group_col, plot_dir)
         for title, path in plot_paths.items():
-            st.image(path, caption=title, use_column_width=True)
+            st.image(path, caption=title, width=700)
             with open(path, 'rb') as f:
                 st.download_button(f"{translate('Download', lang_code)} {title}", data=f, file_name=os.path.basename(path), mime='image/png')
 
