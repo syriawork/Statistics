@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 from pandas import ExcelWriter
+from utilities.translations import translate_dataframe_columns, translate_option, translate_decision
 
 
 def _auto_adjust_column_width(writer: ExcelWriter, sheet_name: str, df: pd.DataFrame) -> None:
@@ -39,7 +40,7 @@ def _format_pvalues(writer: ExcelWriter, sheet_name: str, df: pd.DataFrame) -> N
             })
 
 
-def generate_excel_report(result: dict, df: pd.DataFrame, out_path: str) -> None:
+def generate_excel_report(result: dict, df: pd.DataFrame, out_path: str, lang: str = 'en') -> None:
     """Generate a formatted Excel report with multiple sheets."""
     with pd.ExcelWriter(out_path, engine='xlsxwriter') as writer:
         descriptive = pd.DataFrame(
@@ -48,8 +49,10 @@ def generate_excel_report(result: dict, df: pd.DataFrame, out_path: str) -> None
                 for group, values in result.get('descriptive', {}).items()
             ]
         )
-        descriptive.to_excel(writer, sheet_name='Descriptive Statistics', index=False)
-        _auto_adjust_column_width(writer, 'Descriptive Statistics', descriptive)
+        descriptive = translate_dataframe_columns(descriptive, lang)
+        sheet_name = 'Descriptive Statistics'
+        descriptive.to_excel(writer, sheet_name=sheet_name, index=False)
+        _auto_adjust_column_width(writer, sheet_name, descriptive)
 
         assumptions = pd.DataFrame([
             {
@@ -62,21 +65,27 @@ def generate_excel_report(result: dict, df: pd.DataFrame, out_path: str) -> None
                 'alpha': result.get('assumptions', {}).get('alpha'),
             }
         ])
-        assumptions.to_excel(writer, sheet_name='Assumption Tests', index=False)
-        _auto_adjust_column_width(writer, 'Assumption Tests', assumptions)
-        _format_pvalues(writer, 'Assumption Tests', assumptions)
+        assumptions = translate_dataframe_columns(assumptions, lang)
+        sheet_name = 'Assumption Tests'
+        assumptions.to_excel(writer, sheet_name=sheet_name, index=False)
+        _auto_adjust_column_width(writer, sheet_name, assumptions)
+        _format_pvalues(writer, sheet_name, assumptions)
 
         main_test = result.get('main_test', {})
         main_df = pd.DataFrame([main_test])
-        main_df.to_excel(writer, sheet_name='Main Test', index=False)
-        _auto_adjust_column_width(writer, 'Main Test', main_df)
-        _format_pvalues(writer, 'Main Test', main_df)
+        main_df = translate_dataframe_columns(main_df, lang)
+        sheet_name = 'Main Test'
+        main_df.to_excel(writer, sheet_name=sheet_name, index=False)
+        _auto_adjust_column_width(writer, sheet_name, main_df)
+        _format_pvalues(writer, sheet_name, main_df)
 
         if result.get('posthoc'):
             posthoc = pd.DataFrame(result['posthoc'])
-            posthoc.to_excel(writer, sheet_name='Post-Hoc Results', index=False)
-            _auto_adjust_column_width(writer, 'Post-Hoc Results', posthoc)
-            _format_pvalues(writer, 'Post-Hoc Results', posthoc)
+            posthoc = translate_dataframe_columns(posthoc, lang)
+            sheet_name = 'Post-Hoc Results'
+            posthoc.to_excel(writer, sheet_name=sheet_name, index=False)
+            _auto_adjust_column_width(writer, sheet_name, posthoc)
+            _format_pvalues(writer, sheet_name, posthoc)
 
         summary = pd.DataFrame([
             {
@@ -88,22 +97,33 @@ def generate_excel_report(result: dict, df: pd.DataFrame, out_path: str) -> None
                 'outlier_method': result.get('outlier_method'),
             }
         ])
-        summary.to_excel(writer, sheet_name='Summary', index=False)
-        _auto_adjust_column_width(writer, 'Summary', summary)
+        summary = translate_dataframe_columns(summary, lang)
+        sheet_name = 'Summary'
+        summary.to_excel(writer, sheet_name=sheet_name, index=False)
+        _auto_adjust_column_width(writer, sheet_name, summary)
 
         if result.get('outlier_summary'):
             outlier_df = pd.DataFrame(result['outlier_summary'])
-            outlier_df.to_excel(writer, sheet_name='Outlier Summary', index=False)
-            _auto_adjust_column_width(writer, 'Outlier Summary', outlier_df)
+            outlier_df = translate_dataframe_columns(outlier_df, lang)
+            sheet_name = 'Outlier Summary'
+            outlier_df.to_excel(writer, sheet_name=sheet_name, index=False)
+            _auto_adjust_column_width(writer, sheet_name, outlier_df)
 
         if result.get('capability'):
             capability_df = pd.DataFrame([result['capability']])
-            capability_df.to_excel(writer, sheet_name='Process Capability', index=False)
-            _auto_adjust_column_width(writer, 'Process Capability', capability_df)
+            capability_df = translate_dataframe_columns(capability_df, lang)
+            sheet_name = 'Process Capability'
+            capability_df.to_excel(writer, sheet_name=sheet_name, index=False)
+            _auto_adjust_column_width(writer, sheet_name, capability_df)
 
-        df.to_excel(writer, sheet_name='Raw Data', index=False)
-        _auto_adjust_column_width(writer, 'Raw Data', df)
+        raw_df = df.copy()
+        raw_df = translate_dataframe_columns(raw_df, lang)
+        sheet_name = 'Raw Data'
+        raw_df.to_excel(writer, sheet_name=sheet_name, index=False)
+        _auto_adjust_column_width(writer, sheet_name, raw_df)
 
         graphs = pd.DataFrame([{'note': 'Graphs are available in the PDF or separate PNG exports.'}])
-        graphs.to_excel(writer, sheet_name='Graphs', index=False)
-        _auto_adjust_column_width(writer, 'Graphs', graphs)
+        graphs = translate_dataframe_columns(graphs, lang)
+        sheet_name = 'Graphs'
+        graphs.to_excel(writer, sheet_name=sheet_name, index=False)
+        _auto_adjust_column_width(writer, sheet_name, graphs)

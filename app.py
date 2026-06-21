@@ -1,6 +1,8 @@
 import os
 import tempfile
 
+import inspect
+
 import pandas as pd
 import streamlit as st
 from pharma_tools import calculate_process_capability
@@ -8,99 +10,132 @@ from reports.excel import generate_excel_report
 from reports.pdf import generate_pdf_report
 from stats_analysis.analysis import analyze_groups, remove_outliers
 from visualization.plots import generate_all_plots
+from utilities.translations import (
+    translate,
+    translate_option,
+)
 
-st.title('Biostat Decision Tool')
 
-uploaded = st.file_uploader('Upload CSV', type=['csv'])
+def _maybe_translate_df(df: pd.DataFrame, lang: str) -> pd.DataFrame:
+    return df
+
+
+lang_code = 'en'
+
+st.title(translate('Biostat Decision Tool', lang_code))
+
+uploaded = st.file_uploader(translate('Upload CSV', lang_code), type=['csv'])
 if uploaded is not None:
     df = pd.read_csv(uploaded)
-    st.write('Preview')
+    st.write(translate('Preview', lang_code))
     st.dataframe(df.head())
 
     cols = df.columns.tolist()
-    value_col = st.selectbox('Value column', cols)
-    group_col = st.selectbox('Group column', cols)
-    alpha = st.number_input('Alpha', value=0.05, step=0.01)
-    outlier_method = st.selectbox('Outlier removal method', ['none', 'iqr', 'zscore', 'three-sigma', 'grubbs', 'dixon'])
-    zscore_threshold = st.number_input('Z-score threshold', value=3.0, step=0.1)
-    paired = st.checkbox('Paired samples (paired t-test / Wilcoxon)')
-    calculate_capability = st.checkbox('Calculate Cp/CpK')
+    value_col = st.selectbox(translate('Value column', lang_code), cols)
+    group_col = st.selectbox(translate('Group column', lang_code), cols)
+    alpha = st.number_input(translate('Alpha', lang_code), value=0.05, step=0.01)
+    outlier_method = st.selectbox(
+        translate('Outlier removal method', lang_code),
+        ['none', 'iqr', 'zscore', 'three-sigma', 'grubbs', 'dixon'],
+        format_func=lambda x: translate_option(x, lang_code),
+    )
+    zscore_threshold = st.number_input(translate('Z-score threshold', lang_code), value=3.0, step=0.1)
+    paired = st.checkbox(translate('Paired samples (paired t-test / Wilcoxon)', lang_code))
+    calculate_capability = st.checkbox(translate('Calculate Cp/CpK', lang_code))
     usl = None
     lsl = None
     if calculate_capability:
-        usl = st.number_input('USL', value=0.0, step=0.1)
-        lsl = st.number_input('LSL', value=0.0, step=0.1)
-    p_corr = st.selectbox('P-value correction', ['none', 'bonferroni', 'holm', 'fdr_bh'])
+        usl = st.number_input(translate('USL', lang_code), value=0.0, step=0.1)
+        lsl = st.number_input(translate('LSL', lang_code), value=0.0, step=0.1)
+    p_corr = st.selectbox(
+        translate('P-value correction', lang_code),
+        ['none', 'bonferroni', 'holm', 'fdr_bh'],
+        format_func=lambda x: translate_option(x, lang_code),
+    )
 
-    if st.button('Run analysis'):
+    if st.button(translate('Run analysis', lang_code)):
         d = df.copy()
         if outlier_method != 'none':
             d, summary = remove_outliers(d, value_col, group_col, method=outlier_method, z_threshold=zscore_threshold)
-            st.markdown('### Outlier removal summary')
-            st.dataframe(summary)
+            st.markdown(f"### {translate('Outlier removal summary', lang_code)}")
+            st.dataframe(_maybe_translate_df(summary, lang_code))
 
         p_corr_arg = None if p_corr == 'none' else p_corr
-        result = analyze_groups(
-            d,
-            value_col,
-            group_col,
-            alpha=alpha,
-            p_correction=p_corr_arg,
-            paired=paired,
-        )
+        analyze_kwargs = {
+            'df': d,
+            'value_col': value_col,
+            'group_col': group_col,
+            'alpha': alpha,
+            'p_correction': p_corr_arg,
+            'paired': paired,
+        }
+        if 'language' in inspect.signature(analyze_groups).parameters:
+            analyze_kwargs['language'] = lang_code
+        result = analyze_groups(**analyze_kwargs)
         if calculate_capability and usl is not None and lsl is not None and usl > lsl:
             capability = calculate_process_capability(d[value_col].astype(float).dropna(), usl, lsl)
             result['capability'] = capability
         elif calculate_capability:
-            st.warning('USL must be greater than LSL to calculate Cp/CpK.')
+            st.warning(translate('USL must be greater than LSL to calculate Cp/CpK.', lang_code))
 
-        st.markdown('## Analysis Results')
-        st.markdown('### Descriptive Statistics')
+        st.markdown(f"## {translate('Analysis Results', lang_code)}")
+        st.markdown(f"### {translate('Descriptive Statistics', lang_code)}")
         desc_df = pd.DataFrame([
             {'Group': group, **values} for group, values in result.get('descriptive', {}).items()
         ])
-        st.dataframe(desc_df)
+        st.dataframe(_maybe_translate_df(desc_df, lang_code))
 
-        st.markdown('### Assumption Checks')
+        st.markdown(f"### {translate('Assumption Checks', lang_code)}")
         assumptions = result.get('assumptions', {})
-        st.write(assumptions)
+        assumptions_df = pd.DataFrame([assumptions])
+        st.dataframe(_maybe_translate_df(assumptions_df, lang_code))
 
-        st.markdown('### Main Test')
-        st.write(result.get('main_test', {}))
+        st.markdown(f"### {translate('Main Test', lang_code)}")
+        main_test = result.get('main_test', {})
+        main_df = pd.DataFrame([main_test])
+        st.dataframe(_maybe_translate_df(main_df, lang_code))
 
-        st.markdown('### Post-hoc Results')
+        st.markdown(f"### {translate('Post-hoc Results', lang_code)}")
         posthoc = result.get('posthoc', [])
         if posthoc:
-            st.dataframe(pd.DataFrame(posthoc))
+            posthoc_df = pd.DataFrame(posthoc)
+            st.dataframe(_maybe_translate_df(posthoc_df, lang_code))
         else:
-            st.write('No post-hoc comparisons performed.')
+            st.write(translate('No post-hoc comparisons were performed.', lang_code))
 
         if result.get('outlier_summary'):
-            st.markdown('### Outlier Summary')
-            st.dataframe(pd.DataFrame(result['outlier_summary']))
-            st.markdown(f"**Outlier method:** {result.get('outlier_method')}" )
+            st.markdown(f"### {translate('Outlier Summary', lang_code)}")
+            st.dataframe(_maybe_translate_df(pd.DataFrame(result['outlier_summary']), lang_code))
+            st.markdown(f"**{translate('Outlier method:', lang_code)}** {translate_option(result.get('outlier_method', 'none'), lang_code)}")
 
         if result.get('capability'):
-            st.markdown('### Process Capability')
-            st.write(result['capability'])
+            st.markdown(f"### {translate('Process Capability', lang_code)}")
+            capability_df = pd.DataFrame([result['capability']])
+            st.dataframe(_maybe_translate_df(capability_df, lang_code))
 
-        st.markdown('### Interpretation')
+        st.markdown(f"### {translate('Interpretation', lang_code)}")
         st.write(result.get('interpretation', ''))
 
-        st.markdown('### Graphs')
+        st.markdown(f"### {translate('Graphs', lang_code)}")
         plot_dir = tempfile.mkdtemp(prefix='plots_')
         plot_paths = generate_all_plots(d, value_col, group_col, plot_dir)
         for title, path in plot_paths.items():
             st.image(path, caption=title, use_column_width=True)
             with open(path, 'rb') as f:
-                st.download_button(f'Download {title}', data=f, file_name=os.path.basename(path), mime='image/png')
+                st.download_button(f"{translate('Download', lang_code)} {title}", data=f, file_name=os.path.basename(path), mime='image/png')
 
         tmp_x = tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False)
-        generate_excel_report(result, d, tmp_x.name)
+        if 'lang' in inspect.signature(generate_excel_report).parameters:
+            generate_excel_report(result, d, tmp_x.name, lang=lang_code)
+        else:
+            generate_excel_report(result, d, tmp_x.name)
         with open(tmp_x.name, 'rb') as f:
-            st.download_button('Download Excel report', data=f, file_name='report.xlsx')
+            st.download_button(translate('Download Excel report', lang_code), data=f, file_name='report.xlsx')
 
         tmp_p = tempfile.NamedTemporaryFile(suffix='.pdf', delete=False)
-        generate_pdf_report(result, tmp_p.name, plot_paths=list(plot_paths.values()))
+        if 'lang' in inspect.signature(generate_pdf_report).parameters:
+            generate_pdf_report(result, tmp_p.name, plot_paths=list(plot_paths.values()), lang=lang_code)
+        else:
+            generate_pdf_report(result, tmp_p.name, plot_paths=list(plot_paths.values()))
         with open(tmp_p.name, 'rb') as f:
-            st.download_button('Download PDF report', data=f, file_name='report.pdf')
+            st.download_button(translate('Download PDF report', lang_code), data=f, file_name='report.pdf')

@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 from scipy import stats
 import statsmodels.stats.multitest as smm
+from utilities.translations import translate
 
 
 def remove_outliers_iqr(df, value_col, group_col):
@@ -29,7 +30,7 @@ def _group_stats(series):
     return {'n': int(series.count()), 'mean': float(series.mean()), 'std': float(series.std())}
 
 
-def analyze_groups(df, value_col, group_col, alpha=0.05, p_correction=None):
+def analyze_groups(df, value_col, group_col, alpha=0.05, p_correction=None, language: str = 'en'):
     """
     Analyze groups and choose appropriate test.
     Returns a dict with overall summary and pairwise decisions.
@@ -54,7 +55,7 @@ def analyze_groups(df, value_col, group_col, alpha=0.05, p_correction=None):
     k = len(grouped)
     # decide test
     if k == 1:
-        result['message'] = 'Only one group present; nothing to compare.'
+        result['message'] = translate('Only one group present; no inferential test applied.', language)
         return result
 
     # check normality per group (Shapiro if n reasonable)

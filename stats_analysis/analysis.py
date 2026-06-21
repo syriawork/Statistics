@@ -9,6 +9,7 @@ from scipy import stats
 import statsmodels.stats.multitest as smm
 from statsmodels.stats.multicomp import pairwise_tukeyhsd
 from utilities.interpretation import generate_interpretation
+from utilities.translations import translate
 
 
 def _ensure_series(data: pd.Series | pd.DataFrame) -> pd.Series:
@@ -78,6 +79,13 @@ def _describe_series(series: pd.Series) -> Dict[str, Optional[float]]:
         'q3': q3,
         'iqr': iqr,
     }
+
+
+def _small_sample_warning(groups: Dict[str, np.ndarray], threshold: int = 5) -> Optional[str]:
+    small_groups = [group for group, values in groups.items() if len(values) < threshold]
+    if small_groups:
+        return 'Sample size for one or more groups is small; results may be unreliable.'
+    return None
 
 
 def _numeric_series(series: pd.Series) -> pd.Series:
@@ -507,15 +515,15 @@ def _tukey_posthoc(df: pd.DataFrame, value_col: str, group_col: str, alpha: floa
     return results
 
 
-def _format_decision(pvalue: float, alpha: float) -> Tuple[str, str]:
+def _format_decision(pvalue: float, alpha: float, lang: str = 'en') -> Tuple[str, str]:
     if pvalue >= alpha:
         return (
             'Fail to Reject H0',
-            'P-value is greater than or equal to alpha. Therefore, there is insufficient evidence to reject the null hypothesis.',
+            translate('P-value is greater than or equal to alpha. Therefore, there is insufficient evidence to reject the null hypothesis.', lang),
         )
     return (
         'Reject H0',
-        'P-value is less than alpha. Therefore, there is sufficient evidence to reject the null hypothesis.',
+        translate('P-value is less than alpha. Therefore, there is sufficient evidence to reject the null hypothesis.', lang),
     )
 
 
@@ -526,6 +534,7 @@ def analyze_groups(
     alpha: float = 0.05,
     p_correction: Optional[str] = None,
     paired: bool = False,
+    language: str = 'en',
 ) -> Dict[str, object]:
     """Analyze groups with assumptions, main test, post-hoc, effect size, and interpretation."""
     if value_col not in df.columns or group_col not in df.columns:
@@ -592,6 +601,7 @@ def analyze_groups(
     else:
         levene_p = None
 
+    sample_size_warning = _small_sample_warning(groups)
     result: Dict[str, object] = {
         'descriptive': descriptive,
         'assumptions': {
@@ -599,6 +609,7 @@ def analyze_groups(
             'levene_p': levene_p,
             'alpha': alpha,
         },
+        'sample_size_warning': sample_size_warning,
     }
 
     if len(groups) == 1:
@@ -606,9 +617,9 @@ def analyze_groups(
             'test': 'No comparison',
             'pvalue': None,
             'decision': 'Fail to Reject H0',
-            'interpretation': 'Only one group is available for analysis. No group comparison was performed.',
+            'interpretation': translate('Only one group is available for analysis. No group comparison was performed.', language),
         }
-        result['interpretation'] = 'Only one group present; no inferential test applied.'
+        result['interpretation'] = translate('Only one group present; no inferential test applied.', language)
         return result
 
     if len(groups) == 2:
@@ -649,7 +660,7 @@ def analyze_groups(
                 'effect_size': effect,
             }
             result['posthoc'] = []
-            result['interpretation'] = generate_interpretation(result)
+            result['interpretation'] = generate_interpretation(result, language)
             return result
 
         equal_var = levene_p is not None and levene_p >= alpha
@@ -688,7 +699,7 @@ def analyze_groups(
             'effect_size': effect,
         }
         result['posthoc'] = []
-        result['interpretation'] = generate_interpretation(result)
+        result['interpretation'] = generate_interpretation(result, language)
         return result
 
     all_normal = all(value is not None and value >= alpha for value in normality.values())
@@ -727,7 +738,7 @@ def analyze_groups(
         },
     }
     result['posthoc'] = posthoc
-    result['interpretation'] = generate_interpretation(result)
+    result['interpretation'] = generate_interpretation(result, language)
     return result
 
 
