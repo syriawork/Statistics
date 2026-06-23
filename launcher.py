@@ -1,3 +1,4 @@
+import argparse
 import os
 import sys
 import subprocess
@@ -72,13 +73,23 @@ if not os.path.exists(venv_python):
 # Give a short pause to ensure venv is ready
 time.sleep(1)
 
-print('Starting Streamlit...')
-# --- تعديل رئيسي: إضافة --server.headless=false لإجبار المتصفح على الفتح ---
-cmd = [
-    venv_python if os.path.exists(venv_python) else sys.executable, 
-    '-m', 'streamlit', 'run', 
-    os.path.join(project_dir, 'app.py'),
-    '--server.headless=false'
-]
+parser = argparse.ArgumentParser(description='Launch the statistical application')
+parser.add_argument('--gui', action='store_true', help='Run the local Tkinter data entry GUI instead of Streamlit')
+args = parser.parse_args()
+
+if args.gui:
+    print('Starting local Tkinter GUI...')
+    cmd = [
+        venv_python if os.path.exists(venv_python) else sys.executable,
+        os.path.join(project_dir, 'data_entry_gui.py'),
+    ]
+else:
+    print('Starting Streamlit...')
+    cmd = [
+        venv_python if os.path.exists(venv_python) else sys.executable,
+        '-m', 'streamlit', 'run',
+        os.path.join(project_dir, 'app.py'),
+        '--server.headless=false'
+    ]
 rc = run(cmd)
 sys.exit(rc)

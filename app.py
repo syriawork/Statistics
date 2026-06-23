@@ -1,5 +1,7 @@
 import os
+import sys
 import tempfile
+import argparse
 
 import inspect
 
@@ -24,10 +26,21 @@ lang_code = 'en'
 
 st.title(translate('Biostat Decision Tool', lang_code))
 
-uploaded = st.file_uploader(translate('Upload CSV', lang_code), type=['csv'])
-if uploaded is not None:
-    df = pd.read_csv(uploaded)
-    st.write(translate('Preview', lang_code))
+parser = argparse.ArgumentParser(add_help=False)
+parser.add_argument('--default-csv-path', type=str, default=None)
+parsed_args, _ = parser.parse_known_args(sys.argv[1:])
+default_csv_path = parsed_args.default_csv_path
+loaded_from_default = False
+if default_csv_path and os.path.isfile(default_csv_path):
+    st.info(translate('Loaded data from the local GUI.', lang_code))
+    df = pd.read_csv(default_csv_path)
+    loaded_from_default = True
+else:
+    uploaded = st.file_uploader(translate('Upload CSV', lang_code), type=['csv'])
+    df = pd.read_csv(uploaded) if uploaded is not None else None
+
+if df is not None:
+    st.markdown(f"### {translate('Preview', lang_code)}")
     st.dataframe(df.head())
 
     cols = df.columns.tolist()
@@ -55,6 +68,12 @@ if uploaded is not None:
 
     if st.button(translate('Run analysis', lang_code)):
         d = df.copy()
+        
+        # Check for paired samples with multiple groups
+        unique_groups = d[group_col].nunique()
+        if paired and unique_groups > 2:
+            st.warning(f"⚠️ Paired t-test only works with 2 groups. You have {unique_groups} groups. The analysis will use Kruskal-Wallis or ANOVA instead.")
+        
         if outlier_method != 'none':
             d, summary = remove_outliers(d, value_col, group_col, method=outlier_method, z_threshold=zscore_threshold)
             st.markdown(f"### {translate('Outlier removal summary', lang_code)}")
@@ -79,6 +98,10 @@ if uploaded is not None:
             st.warning(translate('USL must be greater than LSL to calculate Cp/CpK.', lang_code))
 
         st.markdown(f"## {translate('Analysis Results', lang_code)}")
+        
+        # Display number of groups analyzed
+        st.info(f"📊 Groups analyzed: {unique_groups} ({', '.join(sorted(d[group_col].unique().astype(str)))})")
+        
         st.markdown(f"### {translate('Descriptive Statistics', lang_code)}")
         desc_df = pd.DataFrame([
             {'Group': group, **values} for group, values in result.get('descriptive', {}).items()
