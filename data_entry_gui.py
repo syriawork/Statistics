@@ -8,6 +8,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import tkinter.scrolledtext as scrolledtext
 from typing import List, Dict
+import shutil
 
 import pandas as pd
 
@@ -164,8 +165,38 @@ class DataEntryApp:
             '--',
             csv_arg,
         ]
+        env = os.environ.copy()
+        env['STAT_APP_DEFAULT_CSV_PATH'] = temp_file.name
+        env['DEFAULT_CSV_PATH'] = temp_file.name
         try:
-            subprocess.Popen(cmd, cwd=os.path.dirname(app_path), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            popen_kwargs = dict(
+                cwd=os.path.dirname(app_path),
+                env=env,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            # On Windows, avoid creating a visible console window for the child process.
+            if os.name == 'nt' and hasattr(subprocess, 'CREATE_NO_WINDOW'):
+                popen_kwargs['creationflags'] = subprocess.CREATE_NO_WINDOW
+
+            # If this GUI is running as a frozen executable, avoid using the current
+            # executable to launch Streamlit (that would spawn another GUI instance).
+            if getattr(sys, 'frozen', False):
+                # prefer pythonw (no console) then python from PATH, fallback to sys.executable
+                python_exec = shutil.which('pythonw') or shutil.which('python') or sys.executable
+            else:
+                python_exec = sys.executable
+
+            # Ensure Streamlit does not auto-open the browser; we'll open a single tab ourselves.
+            # Replace any explicit server.headless flag in cmd with true
+            cmd = [c for c in cmd if not c.startswith('--server.headless')]
+            cmd.insert(3, '--server.headless=true')
+
+            # Replace sys.executable with chosen python executable when needed
+            cmd[0] = python_exec
+
+            subprocess.Popen(cmd, **popen_kwargs)
         except Exception as e:
             messagebox.showerror('Streamlit Error', f'Unable to start Streamlit: {e}')
             return
