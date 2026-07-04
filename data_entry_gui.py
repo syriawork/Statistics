@@ -1,43 +1,96 @@
 import os
+import shutil
+import socket
 import subprocess
 import sys
 import tempfile
 import threading
-import webbrowser
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
 import tkinter.scrolledtext as scrolledtext
+import webbrowser
+from tkinter import ttk, filedialog, messagebox
 from typing import List, Dict
-import shutil
 
 import pandas as pd
 
 from stats_analysis.analysis import analyze_groups, remove_outliers
 
 
+def _get_free_port():
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(('127.0.0.1', 0))
+        return sock.getsockname()[1]
+
+
+def _stop_previous_streamlit_processes():
+    if os.name != 'nt':
+        return
+    try:
+        subprocess.run(
+            [
+                'powershell', '-NoProfile', '-Command',
+                "Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'python|pythonw|streamlit' -and $_.CommandLine -match 'streamlit' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"
+            ],
+            check=False,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        pass
+
+
 class DataEntryApp:
+    def _setup_style(self):
+        style = ttk.Style(self.root)
+        available_themes = style.theme_names()
+        if 'clam' in available_themes:
+            style.theme_use('clam')
+        elif 'alt' in available_themes:
+            style.theme_use('alt')
+        else:
+            style.theme_use('default')
+
+        default_font = ('Segoe UI', 10)
+        style.configure('.', font=default_font)
+        style.configure('Card.TFrame', background='#f7f9fc')
+        style.configure('Header.TLabel', font=('Segoe UI', 14, 'bold'), foreground='#1f2937', background='#f7f9fc')
+        style.configure('Section.TLabelframe', background='#f7f9fc', borderwidth=0)
+        style.configure('Section.TLabelframe.Label', font=('Segoe UI', 11, 'bold'), foreground='#334155')
+        style.configure('Accent.TButton', font=('Segoe UI', 10, 'bold'), padding=(12, 8), background='#2563eb', foreground='white')
+        style.map('Accent.TButton', background=[('active', '#1d4ed8'), ('disabled', '#93c5fd')], foreground=[('active', 'white')])
+        style.configure('TEntry', padding=5)
+        style.configure('Treeview', rowheight=28, background='white', fieldbackground='white')
+        style.configure('Treeview.Heading', font=('Segoe UI', 10, 'bold'), background='#e2e8f0', foreground='#0f172a')
+        self.root.option_add('*Font', default_font)
+        self.root.configure(background='#f7f9fc')
+
     def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title('Data Entry - Statistical Analysis')
+        self._setup_style()
 
-        frame = ttk.Frame(root, padding=10)
+        frame = ttk.Frame(root, padding=12, style='Card.TFrame')
         frame.pack(fill=tk.BOTH, expand=True)
 
         entry_frame = ttk.Frame(frame)
-        entry_frame.pack(fill=tk.X)
+        entry_frame.pack(fill=tk.X, pady=(0, 10))
 
-        ttk.Label(entry_frame, text='Group:').grid(column=0, row=0, sticky=tk.W)
+        ttk.Label(entry_frame, text='Group:', style='Header.TLabel').grid(column=0, row=0, sticky=tk.W)
         self.group_var = tk.StringVar()
-        ttk.Entry(entry_frame, textvariable=self.group_var, width=20).grid(column=1, row=0, padx=4)
+        self.group_entry = ttk.Entry(entry_frame, textvariable=self.group_var, width=24)
+        self.group_entry.grid(column=1, row=0, padx=6, pady=4)
 
-        ttk.Label(entry_frame, text='Value:').grid(column=2, row=0, sticky=tk.W)
+        ttk.Label(entry_frame, text='Value:', style='Header.TLabel').grid(column=2, row=0, sticky=tk.W, padx=(12, 0))
         self.value_var = tk.StringVar()
-        ttk.Entry(entry_frame, textvariable=self.value_var, width=20).grid(column=3, row=0, padx=4)
+        self.value_entry = ttk.Entry(entry_frame, textvariable=self.value_var, width=24)
+        self.value_entry.grid(column=3, row=0, padx=6, pady=4)
+        self.value_entry.bind('<Return>', self._on_value_return)
 
-        ttk.Button(entry_frame, text='Add', command=self.add_entry).grid(column=4, row=0, padx=4)
+        ttk.Button(entry_frame, text='Add', command=self.add_entry, style='Accent.TButton').grid(column=4, row=0, padx=6, pady=4)
 
         # Treeview for entries with a scrollbar
-        tree_frame = ttk.Frame(frame)
+        tree_frame = ttk.Frame(frame, padding=10, style='Card.TFrame')
         tree_frame.pack(fill=tk.BOTH, expand=True, pady=8)
 
         cols = ('group', 'value')
@@ -45,18 +98,20 @@ class DataEntryApp:
         self.tree.heading('group', text='Group')
         self.tree.heading('value', text='Value')
         self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.tree.tag_configure('evenrow', background='#ffffff')
+        self.tree.tag_configure('oddrow', background='#f8fafc')
 
         tree_scroll = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL, command=self.tree.yview)
         self.tree.configure(yscrollcommand=tree_scroll.set)
         tree_scroll.pack(side=tk.RIGHT, fill=tk.Y)
 
         btn_frame = ttk.Frame(frame)
-        btn_frame.pack(fill=tk.X)
-        ttk.Button(btn_frame, text='Remove Selected', command=self.remove_selected).pack(side=tk.LEFT)
-        ttk.Button(btn_frame, text='Save CSV', command=self.save_csv).pack(side=tk.LEFT, padx=6)
-        ttk.Button(btn_frame, text='Import CSV', command=self.import_csv).pack(side=tk.LEFT, padx=6)
-        ttk.Button(btn_frame, text='Run Analysis', command=self.run_analysis).pack(side=tk.LEFT)
-        ttk.Button(btn_frame, text='Run in Streamlit', command=self.run_analysis_in_streamlit).pack(side=tk.LEFT, padx=6)
+        btn_frame.pack(fill=tk.X, pady=(10, 0))
+        ttk.Button(btn_frame, text='Remove Selected', command=self.remove_selected, style='Accent.TButton').pack(side=tk.LEFT)
+        ttk.Button(btn_frame, text='Save CSV', command=self.save_csv, style='Accent.TButton').pack(side=tk.LEFT, padx=6)
+        ttk.Button(btn_frame, text='Import CSV', command=self.import_csv, style='Accent.TButton').pack(side=tk.LEFT, padx=6)
+        ttk.Button(btn_frame, text='Run Analysis', command=self.run_analysis, style='Accent.TButton').pack(side=tk.LEFT, padx=6)
+        ttk.Button(btn_frame, text='Run in Streamlit', command=self.run_analysis_in_streamlit, style='Accent.TButton').pack(side=tk.LEFT, padx=6)
 
         self.entries: List[Dict[str, object]] = []
 
@@ -72,8 +127,18 @@ class DataEntryApp:
             messagebox.showerror('Input', 'Value must be numeric.')
             return
         self.entries.append({'group': g, 'value': num})
-        self.tree.insert('', tk.END, values=(g, num))
+        tag = 'evenrow' if len(self.entries) % 2 == 0 else 'oddrow'
+        self.tree.insert('', tk.END, values=(g, num), tags=(tag,))
         self.value_var.set('')
+        self.value_entry.focus_set()
+
+    def _refresh_tree_tags(self):
+        for index, item in enumerate(self.tree.get_children()):
+            tag = 'evenrow' if index % 2 == 0 else 'oddrow'
+            self.tree.item(item, tags=(tag,))
+
+    def _on_value_return(self, event):
+        self.add_entry()
 
     def remove_selected(self):
         sel = self.tree.selection()
@@ -90,6 +155,7 @@ class DataEntryApp:
             except Exception:
                 pass
             self.tree.delete(item)
+        self._refresh_tree_tags()
 
     def save_csv(self):
         if not self.entries:
@@ -154,20 +220,27 @@ class DataEntryApp:
         temp_file.close()
         df.to_csv(temp_file.name, index=False)
 
+        _stop_previous_streamlit_processes()
+
         app_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'app.py')
         csv_arg = f'--default-csv-path={temp_file.name}'
+        streamlit_port = _get_free_port()
         cmd = [
             sys.executable,
             '-m', 'streamlit',
             'run',
             app_path,
-            '--server.headless=false',
+            '--server.headless=true',
+            f'--server.port={streamlit_port}',
+            '--server.address=127.0.0.1',
             '--',
             csv_arg,
         ]
         env = os.environ.copy()
         env['STAT_APP_DEFAULT_CSV_PATH'] = temp_file.name
         env['DEFAULT_CSV_PATH'] = temp_file.name
+        env['STREAMLIT_SERVER_PORT'] = str(streamlit_port)
+        env['STREAMLIT_SERVER_ADDRESS'] = '127.0.0.1'
         try:
             popen_kwargs = dict(
                 cwd=os.path.dirname(app_path),
@@ -188,11 +261,6 @@ class DataEntryApp:
             else:
                 python_exec = sys.executable
 
-            # Ensure Streamlit does not auto-open the browser; we'll open a single tab ourselves.
-            # Replace any explicit server.headless flag in cmd with true
-            cmd = [c for c in cmd if not c.startswith('--server.headless')]
-            cmd.insert(3, '--server.headless=true')
-
             # Replace sys.executable with chosen python executable when needed
             cmd[0] = python_exec
 
@@ -202,7 +270,7 @@ class DataEntryApp:
             return
 
         messagebox.showinfo('Streamlit', 'Streamlit is starting with your data. It should open in your browser shortly.')
-        threading.Timer(2.0, lambda: webbrowser.open('http://localhost:8501', new=0)).start()
+        threading.Timer(2.0, lambda: webbrowser.open(f'http://127.0.0.1:{streamlit_port}', new=0)).start()
 
     def show_result_window(self, result: dict):
         win = tk.Toplevel(self.root)

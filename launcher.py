@@ -1,8 +1,9 @@
 import argparse
 import os
-import sys
-import subprocess
 import shutil
+import socket
+import subprocess
+import sys
 import time
 
 # Determine project directory: when frozen, use the exe location; otherwise use file location
@@ -21,6 +22,31 @@ else:
 venv_dir = os.path.join(project_dir, '.venv')
 venv_python = os.path.join(venv_dir, 'Scripts', 'python.exe')
 requirements = os.path.join(project_dir, 'requirements.txt')
+
+
+def _get_free_port():
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(('127.0.0.1', 0))
+        return sock.getsockname()[1]
+
+
+def _stop_previous_streamlit_processes():
+    if os.name != 'nt':
+        return
+    try:
+        subprocess.run(
+            [
+                'powershell', '-NoProfile', '-Command',
+                "Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'python|pythonw|streamlit' -and $_.CommandLine -match 'streamlit' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"
+            ],
+            check=False,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        pass
+
 
 def run(cmd):
     print('Running:', ' '.join(cmd))
@@ -84,12 +110,17 @@ if args.gui:
         os.path.join(project_dir, 'data_entry_gui.py'),
     ]
 else:
+    print('Stopping previous Streamlit processes...')
+    _stop_previous_streamlit_processes()
     print('Starting Streamlit...')
+    streamlit_port = _get_free_port()
     cmd = [
         venv_python if os.path.exists(venv_python) else sys.executable,
         '-m', 'streamlit', 'run',
         os.path.join(project_dir, 'app.py'),
-        '--server.headless=false'
+        '--server.headless=true',
+        f'--server.port={streamlit_port}',
+        '--server.address=127.0.0.1'
     ]
 rc = run(cmd)
 sys.exit(rc)

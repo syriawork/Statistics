@@ -36,6 +36,19 @@ def _get_default_csv_path(argv=None, environ=None):
         candidate = env.get(key)
         if candidate:
             return candidate
+    # If no arg or env var provided, try some common filenames in the project
+    cwd = os.path.dirname(__file__) or os.getcwd()
+    common_names = [
+        'user_data.csv',
+        'test.csv',
+        'test_scenario.csv',
+        os.path.join('data', 'example.csv'),
+        'report.csv',
+    ]
+    for name in common_names:
+        candidate = os.path.join(cwd, name) if not os.path.isabs(name) else name
+        if os.path.isfile(candidate):
+            return candidate
     return None
 
 
