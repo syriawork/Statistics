@@ -1,15 +1,147 @@
+import json
 import os
 import shutil
+import signal
 import socket
 import subprocess
 import sys
 import tempfile
 import threading
 import tkinter as tk
+from datetime import datetime
 import tkinter.scrolledtext as scrolledtext
 import webbrowser
 from tkinter import ttk, filedialog, messagebox
 from typing import List, Dict
+
+
+def _get_project_dir():
+    if getattr(sys, 'frozen', False):
+        base_dir = getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))
+        if os.path.exists(os.path.join(base_dir, 'app.py')):
+            return base_dir
+        parent_dir = os.path.dirname(base_dir)
+        if os.path.exists(os.path.join(parent_dir, 'app.py')):
+            return parent_dir
+        return base_dir
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+def _get_streamlit_pid_file_path():
+    project_dir = _get_project_dir()
+    return os.path.join(project_dir, '.streamlit_launcher.pid')
+
+
+def _get_streamlit_state_path():
+    project_dir = _get_project_dir()
+    return os.path.join(project_dir, '.streamlit_launcher.state.json')
+
+
+def _read_streamlit_pid():
+    pid_file = _get_streamlit_pid_file_path()
+    if not os.path.exists(pid_file):
+        return None
+    try:
+        with open(pid_file, 'r', encoding='utf-8') as fh:
+            value = fh.read().strip()
+        return int(value) if value.isdigit() else None
+    except Exception:
+        return None
+
+
+def _write_streamlit_pid(pid):
+    pid_file = _get_streamlit_pid_file_path()
+    with open(pid_file, 'w', encoding='utf-8') as fh:
+        fh.write(str(pid))
+
+
+def _clear_streamlit_pid():
+    pid_file = _get_streamlit_pid_file_path()
+    if os.path.exists(pid_file):
+        try:
+            os.remove(pid_file)
+        except Exception:
+            pass
+
+
+def _read_streamlit_state():
+    state_path = _get_streamlit_state_path()
+    if not os.path.exists(state_path):
+        return {}
+    try:
+        with open(state_path, 'r', encoding='utf-8') as fh:
+            data = json.load(fh)
+        if isinstance(data, dict):
+            return data
+    except Exception:
+        pass
+    return {}
+
+
+def _write_streamlit_state(pid, port):
+    state_path = _get_streamlit_state_path()
+    with open(state_path, 'w', encoding='utf-8') as fh:
+        json.dump({'pid': pid, 'port': port}, fh, ensure_ascii=False, indent=2)
+
+
+def _clear_streamlit_state():
+    state_path = _get_streamlit_state_path()
+    if os.path.exists(state_path):
+        try:
+            os.remove(state_path)
+        except Exception:
+            pass
+
+
+def _is_port_open(port):
+    if not port:
+        return False
+    try:
+        with socket.create_connection(('127.0.0.1', int(port)), timeout=0.5):
+            return True
+    except OSError:
+        return False
+
+
+def _terminate_process_tree(pid):
+    if not pid:
+        return
+    try:
+        if os.name == 'nt':
+            subprocess.run(
+                ['taskkill', '/PID', str(pid), '/T', '/F'],
+                check=False,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        else:
+            os.killpg(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    except Exception:
+        pass
+
+
+def _get_streamlit_log_path():
+    project_dir = _get_project_dir()
+    return os.path.join(project_dir, '.streamlit_launcher.log')
+
+
+def _get_shared_session_store_path():
+    project_dir = _get_project_dir()
+    return os.path.join(project_dir, '.shared_analysis_session.json')
+
+
+def _write_shared_session_store(df):
+    store_path = _get_shared_session_store_path()
+    payload = {
+        'columns': df.columns.tolist(),
+        'rows': df.to_dict(orient='records'),
+    }
+    with open(store_path, 'w', encoding='utf-8') as fh:
+        json.dump(payload, fh, ensure_ascii=False, indent=2)
+    return store_path
 
 import pandas as pd
 
@@ -23,6 +155,13 @@ def _get_free_port():
 
 
 def _stop_previous_streamlit_processes():
+    previous_pid = _read_streamlit_pid()
+    if previous_pid is not None:
+        _terminate_process_tree(previous_pid)
+        _clear_streamlit_pid()
+        _clear_streamlit_state()
+        return
+
     if os.name != 'nt':
         return
     try:
@@ -212,65 +351,111 @@ class DataEntryApp:
         self.show_result_window(result)
 
     def run_analysis_in_streamlit(self):
+        import subprocess
+        import os
+        import sys
+        import threading
+        import webbrowser
+        import shutil
+        import pandas as pd
+
         if not self.entries:
             messagebox.showinfo('Analysis', 'No entries to analyze.')
             return
+
         df = pd.DataFrame(self.entries)
-        temp_file = tempfile.NamedTemporaryFile(suffix='.csv', delete=False)
-        temp_file.close()
-        df.to_csv(temp_file.name, index=False)
+        session_store_path = _write_shared_session_store(df)
 
-        _stop_previous_streamlit_processes()
-
-        app_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'app.py')
-        csv_arg = f'--default-csv-path={temp_file.name}'
-        streamlit_port = _get_free_port()
-        cmd = [
-            sys.executable,
-            '-m', 'streamlit',
-            'run',
-            app_path,
-            '--server.headless=true',
-            f'--server.port={streamlit_port}',
-            '--server.address=127.0.0.1',
-            '--',
-            csv_arg,
-        ]
-        env = os.environ.copy()
-        env['STAT_APP_DEFAULT_CSV_PATH'] = temp_file.name
-        env['DEFAULT_CSV_PATH'] = temp_file.name
-        env['STREAMLIT_SERVER_PORT'] = str(streamlit_port)
-        env['STREAMLIT_SERVER_ADDRESS'] = '127.0.0.1'
-        try:
-            popen_kwargs = dict(
-                cwd=os.path.dirname(app_path),
-                env=env,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+        state = _read_streamlit_state()
+        existing_port = state.get('port')
+        if existing_port and _is_port_open(existing_port):
+            messagebox.showinfo(
+                'Streamlit',
+                'Streamlit is already running. Refreshing data without restarting the server.'
             )
-            # On Windows, avoid creating a visible console window for the child process.
-            if os.name == 'nt' and hasattr(subprocess, 'CREATE_NO_WINDOW'):
-                popen_kwargs['creationflags'] = subprocess.CREATE_NO_WINDOW
-
-            # If this GUI is running as a frozen executable, avoid using the current
-            # executable to launch Streamlit (that would spawn another GUI instance).
-            if getattr(sys, 'frozen', False):
-                # prefer pythonw (no console) then python from PATH, fallback to sys.executable
-                python_exec = shutil.which('pythonw') or shutil.which('python') or sys.executable
-            else:
-                python_exec = sys.executable
-
-            # Replace sys.executable with chosen python executable when needed
-            cmd[0] = python_exec
-
-            subprocess.Popen(cmd, **popen_kwargs)
-        except Exception as e:
-            messagebox.showerror('Streamlit Error', f'Unable to start Streamlit: {e}')
+            threading.Timer(0.5, lambda: webbrowser.open(f'http://127.0.0.1:{existing_port}/?refresh={os.getpid()}', new=0)).start()
             return
 
-        messagebox.showinfo('Streamlit', 'Streamlit is starting with your data. It should open in your browser shortly.')
-        threading.Timer(2.0, lambda: webbrowser.open(f'http://127.0.0.1:{streamlit_port}', new=0)).start()
+        if state.get('pid') is not None:
+            _terminate_process_tree(state.get('pid'))
+        _clear_streamlit_pid()
+        _clear_streamlit_state()
+        _stop_previous_streamlit_processes()
+
+        project_dir = _get_project_dir()
+        app_path = os.path.join(project_dir, 'app.py')
+
+        if not os.path.exists(app_path):
+            messagebox.showerror(
+                'Streamlit Error',
+                f'Cannot locate app.py\nExpected: {app_path}'
+            )
+            return
+
+        streamlit_port = _get_free_port()
+
+        streamlit_exec = shutil.which("streamlit")
+
+        if not streamlit_exec:
+            messagebox.showerror(
+                'Streamlit Error',
+                'Streamlit is not installed or not in PATH.'
+            )
+            return
+
+        cmd = [
+            streamlit_exec,
+            "run",
+            app_path,
+            f"--server.port={streamlit_port}",
+            "--server.address=127.0.0.1",
+            "--server.headless=true",
+            "--",
+            f"--session-store-path={session_store_path}",
+        ]
+
+        env = os.environ.copy()
+        env.update({
+            'STAT_APP_SESSION_STORE_PATH': session_store_path,
+            'DEFAULT_SESSION_STORE_PATH': session_store_path,
+        })
+
+        log_path = _get_streamlit_log_path()
+        os.makedirs(os.path.dirname(log_path), exist_ok=True)
+
+        popen_kwargs = dict(
+            cwd=os.path.dirname(app_path),
+            env=env,
+            stdin=subprocess.DEVNULL,
+        )
+
+        if os.name == 'nt':
+            popen_kwargs['creationflags'] = getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0)
+            if hasattr(subprocess, 'CREATE_NO_WINDOW'):
+                popen_kwargs['creationflags'] |= subprocess.CREATE_NO_WINDOW
+        else:
+            popen_kwargs['start_new_session'] = True
+
+        try:
+            with open(log_path, 'a', encoding='utf-8') as log_file:
+                log_file.write(f'\n[{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}] Starting Streamlit from {app_path}\n')
+                log_file.flush()
+                proc = subprocess.Popen(cmd, stdout=log_file, stderr=subprocess.STDOUT, **popen_kwargs)
+                _write_streamlit_pid(proc.pid)
+                _write_streamlit_state(proc.pid, streamlit_port)
+        except Exception as e:
+            messagebox.showerror('Streamlit Error', str(e))
+            return
+
+        messagebox.showinfo(
+            'Streamlit',
+            'Streamlit is starting... Browser will open shortly.'
+        )
+
+        def open_browser():
+            webbrowser.open(f'http://127.0.0.1:{streamlit_port}')
+
+        threading.Timer(3.5, open_browser).start()
 
     def show_result_window(self, result: dict):
         win = tk.Toplevel(self.root)

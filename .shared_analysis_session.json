@@ -1,0 +1,56 @@
+{
+  "columns": [
+    "group",
+    "value"
+  ],
+  "rows": [
+    {
+      "group": "A",
+      "value": 100.5
+    },
+    {
+      "group": "A",
+      "value": 101.1
+    },
+    {
+      "group": "A",
+      "value": 99.0
+    },
+    {
+      "group": "A",
+      "value": 98.8
+    },
+    {
+      "group": "A",
+      "value": 100.9
+    },
+    {
+      "group": "A",
+      "value": 101.6
+    },
+    {
+      "group": "B",
+      "value": 102.3
+    },
+    {
+      "group": "B",
+      "value": 103.4
+    },
+    {
+      "group": "B",
+      "value": 103.6
+    },
+    {
+      "group": "B",
+      "value": 101.2
+    },
+    {
+      "group": "B",
+      "value": 104.1
+    },
+    {
+      "group": "B",
+      "value": 140.0
+    }
+  ]
+}
