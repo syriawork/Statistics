@@ -16,3 +16,57 @@ Traceback (most recent call last):
     self._sock.shutdown(socket.SHUT_RDWR)
     ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
 ConnectionResetError: [WinError 10054] An existing connection was forcibly closed by the remote host
+
+[2026-07-05 14:27:50] Starting Streamlit from e:\programs and applications\Statistics\app.py
+2026-07-05 14:27:53.521 Uvicorn server started on 0.0.0.0:51493
+
+  You can now view your Streamlit app in your browser.
+
+  Local URL: http://localhost:51493
+  Network URL: http://192.168.30.167:51493
+  External URL: http://131.222.250.146:51493
+
+
+[2026-07-05 14:49:19] Starting Streamlit from e:\programs and applications\Statistics\app.py
+2026-07-05 14:49:21.552 Uvicorn server started on 127.0.0.1:51723
+
+  You can now view your Streamlit app in your browser.
+
+  URL: http://127.0.0.1:51723
+
+Exception in callback _ProactorBasePipeTransport._call_connection_lost()
+handle: <Handle _ProactorBasePipeTransport._call_connection_lost()>
+Traceback (most recent call last):
+  File "C:\Users\ALPHA\AppData\Local\Python\pythoncore-3.14-64\Lib\asyncio\events.py", line 94, in _run
+    self._context.run(self._callback, *self._args)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\ALPHA\AppData\Local\Python\pythoncore-3.14-64\Lib\asyncio\proactor_events.py", line 165, in _call_connection_lost
+    self._sock.shutdown(socket.SHUT_RDWR)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+ConnectionResetError: [WinError 10054] An existing connection was forcibly closed by the remote host
+
+[2026-07-05 15:20:54] Starting Streamlit from e:\programs and applications\Statistics\app.py
+2026-07-05 15:20:57.856 Uvicorn server started on 127.0.0.1:50088
+
+  You can now view your Streamlit app in your browser.
+
+  URL: http://127.0.0.1:50088
+
+Exception in callback _ProactorBasePipeTransport._call_connection_lost()
+handle: <Handle _ProactorBasePipeTransport._call_connection_lost()>
+Traceback (most recent call last):
+  File "C:\Users\ALPHA\AppData\Local\Python\pythoncore-3.14-64\Lib\asyncio\events.py", line 94, in _run
+    self._context.run(self._callback, *self._args)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\ALPHA\AppData\Local\Python\pythoncore-3.14-64\Lib\asyncio\proactor_events.py", line 165, in _call_connection_lost
+    self._sock.shutdown(socket.SHUT_RDWR)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+ConnectionResetError: [WinError 10054] An existing connection was forcibly closed by the remote host
+
+[2026-07-12 09:15:39] Starting Streamlit from e:\programs and applications\Statistics\app.py
+2026-07-12 09:15:44.909 Uvicorn server started on 127.0.0.1:49861
+
+  You can now view your Streamlit app in your browser.
+
+  URL: http://127.0.0.1:49861
+

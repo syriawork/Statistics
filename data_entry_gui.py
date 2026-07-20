@@ -17,24 +17,47 @@ from typing import List, Dict
 
 def _get_project_dir():
     if getattr(sys, 'frozen', False):
+        # In PyInstaller, _MEIPASS is the temp directory for onefile or the exe directory for onedir
         base_dir = getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))
+
+        # Check if app.py is in the base directory
         if os.path.exists(os.path.join(base_dir, 'app.py')):
             return base_dir
+
+        # Check if it's in the _internal directory (common in newer PyInstaller onedir builds)
+        internal_dir = os.path.join(base_dir, '_internal')
+        if os.path.exists(os.path.join(internal_dir, 'app.py')):
+            return internal_dir
+
+        # Check if it's next to the executable (if base_dir was _MEIPASS)
+        exe_dir = os.path.dirname(sys.executable)
+        if os.path.exists(os.path.join(exe_dir, 'app.py')):
+            return exe_dir
+
+        # Try parent directory as a fallback
         parent_dir = os.path.dirname(base_dir)
         if os.path.exists(os.path.join(parent_dir, 'app.py')):
             return parent_dir
+
         return base_dir
     return os.path.dirname(os.path.abspath(__file__))
 
 
+def _get_runtime_dir():
+    """Returns a directory for persistent runtime files (PIDs, logs, state)."""
+    if getattr(sys, 'frozen', False):
+        return os.path.dirname(sys.executable)
+    return os.path.dirname(os.path.abspath(__file__))
+
+
 def _get_streamlit_pid_file_path():
-    project_dir = _get_project_dir()
-    return os.path.join(project_dir, '.streamlit_launcher.pid')
+    runtime_dir = _get_runtime_dir()
+    return os.path.join(runtime_dir, '.streamlit_launcher.pid')
 
 
 def _get_streamlit_state_path():
-    project_dir = _get_project_dir()
-    return os.path.join(project_dir, '.streamlit_launcher.state.json')
+    runtime_dir = _get_runtime_dir()
+    return os.path.join(runtime_dir, '.streamlit_launcher.state.json')
 
 
 def _read_streamlit_pid():
@@ -124,13 +147,13 @@ def _terminate_process_tree(pid):
 
 
 def _get_streamlit_log_path():
-    project_dir = _get_project_dir()
-    return os.path.join(project_dir, '.streamlit_launcher.log')
+    runtime_dir = _get_runtime_dir()
+    return os.path.join(runtime_dir, '.streamlit_launcher.log')
 
 
 def _get_shared_session_store_path():
-    project_dir = _get_project_dir()
-    return os.path.join(project_dir, '.shared_analysis_session.json')
+    runtime_dir = _get_runtime_dir()
+    return os.path.join(runtime_dir, '.shared_analysis_session.json')
 
 
 def _write_shared_session_store(df):
@@ -394,25 +417,13 @@ class DataEntryApp:
 
         streamlit_port = _get_free_port()
 
-        streamlit_exec = shutil.which("streamlit")
-
-        if not streamlit_exec:
-            messagebox.showerror(
-                'Streamlit Error',
-                'Streamlit is not installed or not in PATH.'
-            )
-            return
-
-        cmd = [
-            streamlit_exec,
-            "run",
-            app_path,
-            f"--server.port={streamlit_port}",
-            "--server.address=127.0.0.1",
-            "--server.headless=true",
-            "--",
-            f"--session-store-path={session_store_path}",
-        ]
+        # استخدم نفس ملف الـ EXE بدلاً من البحث عن streamlit الخارجي
+        if getattr(sys, 'frozen', False):
+            # إذا كان البرنامج يعمل كـ EXE
+            cmd = [sys.executable, "--server", str(streamlit_port)]
+        else:
+            # إذا كان يعمل من VS Code
+            cmd = [sys.executable, "launcher.py", "--server", str(streamlit_port)]
 
         env = os.environ.copy()
         env.update({
@@ -423,8 +434,12 @@ class DataEntryApp:
         log_path = _get_streamlit_log_path()
         os.makedirs(os.path.dirname(log_path), exist_ok=True)
 
+        # تحديد مجلد العمل ليكون مجلد المشروع (يضمن وجود app.py والموارد)
+        # عند التشغيل كـ EXE، استخدم `project_dir` بدلًا من مجلد التنفيذ المؤقت
+        work_dir = project_dir
+
         popen_kwargs = dict(
-            cwd=os.path.dirname(app_path),
+            cwd=work_dir,
             env=env,
             stdin=subprocess.DEVNULL,
         )
@@ -440,22 +455,37 @@ class DataEntryApp:
             with open(log_path, 'a', encoding='utf-8') as log_file:
                 log_file.write(f'\n[{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}] Starting Streamlit from {app_path}\n')
                 log_file.flush()
-                proc = subprocess.Popen(cmd, stdout=log_file, stderr=subprocess.STDOUT, **popen_kwargs)
+                # توجيه stdout/stderr إلى ملف السجل عبر popen_kwargs
+                popen_kwargs['stdout'] = log_file
+                popen_kwargs['stderr'] = subprocess.STDOUT
+                proc = subprocess.Popen(cmd, **popen_kwargs)
                 _write_streamlit_pid(proc.pid)
                 _write_streamlit_state(proc.pid, streamlit_port)
         except Exception as e:
             messagebox.showerror('Streamlit Error', str(e))
             return
 
+        def wait_and_open():
+            # الانتظار حتى يصبح المنفذ متاحاً (بحد أقصى 20 ثانية)
+            start_time = datetime.now()
+            while (datetime.now() - start_time).total_seconds() < 20:
+                if _is_port_open(streamlit_port):
+                    webbrowser.open(f'http://127.0.0.1:{streamlit_port}')
+                    return
+                import time
+                time.sleep(0.5)
+
+            messagebox.showwarning(
+                'Streamlit Timeout',
+                'Streamlit is taking too long to start. Please check the logs or try refreshing later.'
+            )
+
+        threading.Thread(target=wait_and_open, daemon=True).start()
+
         messagebox.showinfo(
             'Streamlit',
-            'Streamlit is starting... Browser will open shortly.'
+            'Streamlit is starting... The browser will open automatically once it is ready.'
         )
-
-        def open_browser():
-            webbrowser.open(f'http://127.0.0.1:{streamlit_port}')
-
-        threading.Timer(3.5, open_browser).start()
 
     def show_result_window(self, result: dict):
         win = tk.Toplevel(self.root)

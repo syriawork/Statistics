@@ -5,6 +5,19 @@ import os
 import sys
 import tempfile
 
+# Fix for Streamlit PackageNotFoundError in PyInstaller
+if getattr(sys, 'frozen', False):
+    import importlib.metadata
+    original_version = importlib.metadata.version
+    def patched_version(package_name):
+        try:
+            return original_version(package_name)
+        except importlib.metadata.PackageNotFoundError:
+            if package_name == 'streamlit':
+                return "1.58.0"
+            raise
+    importlib.metadata.version = patched_version
+
 import pandas as pd
 import streamlit as st
 
