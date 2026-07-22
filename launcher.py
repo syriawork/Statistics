@@ -2,6 +2,8 @@ import os
 import sys
 import socket
 import importlib.metadata
+import subprocess
+from pathlib import Path
 
 # When running as a frozen EXE, help tkinter find bundled Tcl/Tk data
 if getattr(sys, 'frozen', False):
@@ -34,8 +36,6 @@ if getattr(sys, 'frozen', False):
         return orig_version(name)
     importlib.metadata.version = patched_version
 
-import streamlit.web.cli as stcli
-
 def get_resource_path(relative_path):
     if getattr(sys, 'frozen', False):
         # البحث في مجلد الاستخراج المؤقت وفي مجلد _internal
@@ -48,19 +48,35 @@ def get_resource_path(relative_path):
 
 def run_streamlit(port):
     app_path = get_resource_path("app.py")
-    # الانتقال لمجلد الملف لضمان عمل المسارات الداخلية لـ Streamlit
+    app_dir = str(Path(app_path).resolve().parent)
     try:
-        os.chdir(os.path.dirname(app_path) or os.getcwd())
+        os.chdir(app_dir or os.getcwd())
     except Exception:
         pass
 
-    # المعاملات الأساسية لتجنب Not Found
+    if getattr(sys, 'frozen', False):
+        # A PyInstaller executable cannot be used as ``python -m streamlit``.
+        # Run Streamlit in this process instead of recursively launching the EXE.
+        import streamlit.web.cli as stcli
+        sys.argv = [
+            'streamlit', 'run', app_path,
+            '--server.port', str(int(port)),
+            '--server.headless', 'true',
+            '--server.address', '127.0.0.1',
+            '--global.developmentMode', 'false',
+            '--browser.gatherUsageStats', 'false',
+        ]
+        stcli.main()
+        return
+
+    import streamlit.web.cli as stcli
     sys.argv = [
-        "streamlit", "run", app_path,
-        "--server.port", str(int(port)),
-        "--server.headless", "true",
-        "--server.address", "127.0.0.1",
-        "--global.developmentMode", "false",
+        'streamlit', 'run', app_path,
+        '--server.port', str(int(port)),
+        '--server.headless', 'true',
+        '--server.address', '127.0.0.1',
+        '--global.developmentMode', 'false',
+        '--browser.gatherUsageStats', 'false',
     ]
     stcli.main()
 

@@ -1,3 +1,4 @@
+import argparse
 import json
 import os
 import shutil
@@ -10,6 +11,8 @@ import threading
 import tkinter as tk
 from datetime import datetime
 import tkinter.scrolledtext as scrolledtext
+import urllib.error
+import urllib.request
 import webbrowser
 from tkinter import ttk, filedialog, messagebox
 from typing import List, Dict
@@ -38,6 +41,23 @@ def _get_project_dir():
         parent_dir = os.path.dirname(base_dir)
         if os.path.exists(os.path.join(parent_dir, 'app.py')):
             return parent_dir
+
+        # The GUI and Streamlit launcher are built as two sibling onedir apps.
+        # In that layout app.py can live under several candidate directories.
+        candidate_dirs = [
+            base_dir,
+            internal_dir,
+            parent_dir,
+            os.path.join(parent_dir, '_internal'),
+            os.path.join(parent_dir, 'launcher'),
+            os.path.join(parent_dir, 'launcher', '_internal'),
+            os.path.join(os.path.dirname(parent_dir), 'launcher'),
+            os.path.join(os.path.dirname(parent_dir), 'launcher', '_internal'),
+        ]
+        for candidate_dir in candidate_dirs:
+            app_file = os.path.join(candidate_dir, 'app.py')
+            if os.path.exists(app_file):
+                return candidate_dir
 
         return base_dir
     return os.path.dirname(os.path.abspath(__file__))
@@ -175,6 +195,54 @@ def _get_free_port():
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(('127.0.0.1', 0))
         return sock.getsockname()[1]
+
+
+def _build_streamlit_launch_command(project_dir, port, frozen=False, executable_path=None):
+    executable_path = executable_path or sys.executable
+    if frozen:
+        # In an onedir build, launcher.exe is beside the _internal directory.
+        # Prefer it so the GUI process and the Streamlit process remain separate.
+        candidate_dirs = [project_dir, os.path.dirname(executable_path)]
+        for candidate_dir in list(candidate_dirs):
+            candidate_dirs.append(os.path.dirname(candidate_dir))
+        for candidate_dir in candidate_dirs:
+            for launcher_exe in (
+                os.path.join(candidate_dir, 'launcher.exe'),
+                os.path.join(candidate_dir, 'launcher', 'launcher.exe'),
+            ):
+                if os.path.isfile(launcher_exe):
+                    return [launcher_exe, '--server', str(port)]
+        # Keep a useful fallback for a build where launcher.exe was not copied.
+        return [executable_path, '--server', str(port)]
+
+    launcher_script = os.path.join(project_dir, 'launcher.py')
+    if os.path.exists(launcher_script):
+        return [sys.executable, launcher_script, '--server', str(port)]
+    return [executable_path, '--server', str(port)]
+
+
+def _launch_streamlit_server(port):
+    app_path = os.path.join(_get_project_dir(), 'app.py')
+    if not os.path.exists(app_path):
+        raise FileNotFoundError(f'Cannot locate app.py at {app_path}')
+
+    app_dir = os.path.dirname(app_path) or os.getcwd()
+    try:
+        os.chdir(app_dir)
+    except Exception:
+        pass
+
+    import streamlit.web.cli as stcli
+
+    sys.argv = [
+        'streamlit', 'run', app_path,
+        '--server.port', str(int(port)),
+        '--server.headless', 'true',
+        '--server.address', '127.0.0.1',
+        '--global.developmentMode', 'false',
+        '--browser.gatherUsageStats', 'false',
+    ]
+    stcli.main()
 
 
 def _stop_previous_streamlit_processes():
@@ -392,18 +460,30 @@ class DataEntryApp:
         state = _read_streamlit_state()
         existing_port = state.get('port')
         if existing_port and _is_port_open(existing_port):
-            messagebox.showinfo(
-                'Streamlit',
-                'Streamlit is already running. Refreshing data without restarting the server.'
-            )
-            threading.Timer(0.5, lambda: webbrowser.open(f'http://127.0.0.1:{existing_port}/?refresh={os.getpid()}', new=0)).start()
-            return
+            # Validate that the old port is still serving the app
+            try:
+                urllib.request.urlopen(f'http://127.0.0.1:{existing_port}/', timeout=2)
+                messagebox.showinfo(
+                    'Streamlit',
+                    'Streamlit is already running. Refreshing data without restarting the server.'
+                )
+                threading.Timer(0.5, lambda: webbrowser.open(f'http://127.0.0.1:{existing_port}/?refresh={os.getpid()}', new=0)).start()
+                return
+            except Exception:
+                pass
 
         if state.get('pid') is not None:
             _terminate_process_tree(state.get('pid'))
         _clear_streamlit_pid()
         _clear_streamlit_state()
         _stop_previous_streamlit_processes()
+        # Force clean any stale ports stored from earlier runs.
+        existing_port = state.get('port')
+        if existing_port and _is_port_open(existing_port):
+            try:
+                urllib.request.urlopen(f'http://127.0.0.1:{existing_port}/', timeout=2)
+            except Exception:
+                pass
 
         project_dir = _get_project_dir()
         app_path = os.path.join(project_dir, 'app.py')
@@ -416,14 +496,12 @@ class DataEntryApp:
             return
 
         streamlit_port = _get_free_port()
-
-        # استخدم نفس ملف الـ EXE بدلاً من البحث عن streamlit الخارجي
-        if getattr(sys, 'frozen', False):
-            # إذا كان البرنامج يعمل كـ EXE
-            cmd = [sys.executable, "--server", str(streamlit_port)]
-        else:
-            # إذا كان يعمل من VS Code
-            cmd = [sys.executable, "launcher.py", "--server", str(streamlit_port)]
+        cmd = _build_streamlit_launch_command(
+            project_dir,
+            streamlit_port,
+            frozen=getattr(sys, 'frozen', False),
+            executable_path=sys.executable,
+        )
 
         env = os.environ.copy()
         env.update({
@@ -466,18 +544,23 @@ class DataEntryApp:
             return
 
         def wait_and_open():
-            # الانتظار حتى يصبح المنفذ متاحاً (بحد أقصى 20 ثانية)
+            # الانتظار حتى يصبح الخادم يستجيب برمز HTTP صالح (بحد أقصى 20 ثانية)
             start_time = datetime.now()
             while (datetime.now() - start_time).total_seconds() < 20:
                 if _is_port_open(streamlit_port):
-                    webbrowser.open(f'http://127.0.0.1:{streamlit_port}')
-                    return
+                    try:
+                        with urllib.request.urlopen(f'http://127.0.0.1:{streamlit_port}/', timeout=2) as resp:
+                            if resp.status == 200:
+                                webbrowser.open(f'http://127.0.0.1:{streamlit_port}')
+                                return
+                    except Exception:
+                        pass
                 import time
                 time.sleep(0.5)
 
             messagebox.showwarning(
                 'Streamlit Timeout',
-                'Streamlit is taking too long to start. Please check the logs or try refreshing later.'
+                'Streamlit is taking too long to start or the server is not serving the Streamlit app. Please check the logs or try refreshing later.'
             )
 
         threading.Thread(target=wait_and_open, daemon=True).start()
@@ -511,7 +594,22 @@ class DataEntryApp:
         txt.configure(state=tk.DISABLED)
 
 
+def _parse_runtime_args(argv=None):
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument('--server', type=int, default=None)
+    parsed, _ = parser.parse_known_args(argv or sys.argv[1:])
+    return parsed
+
+
 def main():
+    parsed = _parse_runtime_args()
+    if parsed.server is not None:
+        try:
+            _launch_streamlit_server(parsed.server)
+        except Exception as exc:
+            raise SystemExit(f'Streamlit startup failed: {exc}') from exc
+        return
+
     root = tk.Tk()
     app = DataEntryApp(root)
     root.mainloop()

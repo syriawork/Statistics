@@ -70,3 +70,19 @@ ConnectionResetError: [WinError 10054] An existing connection was forcibly close
 
   URL: http://127.0.0.1:49861
 
+
+[2026-07-20 10:14:02] Starting Streamlit from e:\programs and applications\Statistics\app.py
+2026-07-20 10:14:08.713 Uvicorn server started on 127.0.0.1:50787
+
+  You can now view your Streamlit app in your browser.
+
+  URL: http://127.0.0.1:50787
+
+
+[2026-07-21 15:49:51] Starting Streamlit from e:\programs and applications\Statistics\app.py
+2026-07-21 15:50:02.428 Uvicorn server started on 127.0.0.1:54485
+
+  You can now view your Streamlit app in your browser.
+
+  URL: http://127.0.0.1:54485
+

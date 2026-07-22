@@ -1,0 +1,40 @@
+{
+  "columns": [
+    "group",
+    "value"
+  ],
+  "rows": [
+    {
+      "group": "A",
+      "value": 100.5
+    },
+    {
+      "group": "A",
+      "value": 101.3
+    },
+    {
+      "group": "A",
+      "value": 101.9
+    },
+    {
+      "group": "A",
+      "value": 99.9
+    },
+    {
+      "group": "B",
+      "value": 97.6
+    },
+    {
+      "group": "B",
+      "value": 96.2
+    },
+    {
+      "group": "B",
+      "value": 95.1
+    },
+    {
+      "group": "B",
+      "value": 97.4
+    }
+  ]
+}

@@ -1,0 +1,75 @@
+('E:\\programs and '
+ 'applications\\Statistics\\build_final_launcher\\launcher\\launcher.pkg',
+ {'BINARY': True,
+  'DATA': True,
+  'EXECUTABLE': True,
+  'EXTENSION': True,
+  'PYMODULE': True,
+  'PYSOURCE': True,
+  'PYZ': False,
+  'SPLASH': True,
+  'SYMLINK': False},
+ [('pyi-contents-directory _internal', '', 'OPTION'),
+  ('PYZ-00.pyz',
+   'E:\\programs and '
+   'applications\\Statistics\\build_final_launcher\\launcher\\PYZ-00.pyz',
+   'PYZ'),
+  ('struct',
+   'E:\\programs and '
+   'applications\\Statistics\\build_final_launcher\\launcher\\localpycs\\struct.pyc',
+   'PYMODULE'),
+  ('pyimod01_archive',
+   'E:\\programs and '
+   'applications\\Statistics\\build_final_launcher\\launcher\\localpycs\\pyimod01_archive.pyc',
+   'PYMODULE'),
+  ('pyimod02_importers',
+   'E:\\programs and '
+   'applications\\Statistics\\build_final_launcher\\launcher\\localpycs\\pyimod02_importers.pyc',
+   'PYMODULE'),
+  ('pyimod03_ctypes',
+   'E:\\programs and '
+   'applications\\Statistics\\build_final_launcher\\launcher\\localpycs\\pyimod03_ctypes.pyc',
+   'PYMODULE'),
+  ('pyimod04_pywin32',
+   'E:\\programs and '
+   'applications\\Statistics\\build_final_launcher\\launcher\\localpycs\\pyimod04_pywin32.pyc',
+   'PYMODULE'),
+  ('pyiboot01_bootstrap',
+   'e:\\programs and '
+   'applications\\Statistics\\.venv\\Lib\\site-packages\\PyInstaller\\loader\\pyiboot01_bootstrap.py',
+   'PYSOURCE'),
+  ('pyi_rth_inspect',
+   'E:\\programs and '
+   'applications\\Statistics\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks\\pyi_rth_inspect.py',
+   'PYSOURCE'),
+  ('pyi_rth_pkgutil',
+   'E:\\programs and '
+   'applications\\Statistics\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks\\pyi_rth_pkgutil.py',
+   'PYSOURCE'),
+  ('pyi_rth_multiprocessing',
+   'E:\\programs and '
+   'applications\\Statistics\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks\\pyi_rth_multiprocessing.py',
+   'PYSOURCE'),
+  ('pyi_rth_mplconfig',
+   'E:\\programs and '
+   'applications\\Statistics\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks\\pyi_rth_mplconfig.py',
+   'PYSOURCE'),
+  ('pyi_rth_setuptools',
+   'E:\\programs and '
+   'applications\\Statistics\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks\\pyi_rth_setuptools.py',
+   'PYSOURCE'),
+  ('pyi_rth__tkinter',
+   'E:\\programs and '
+   'applications\\Statistics\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks\\pyi_rth__tkinter.py',
+   'PYSOURCE'),
+  ('launcher',
+   'E:\\programs and applications\\Statistics\\launcher.py',
+   'PYSOURCE')],
+ 'python314.dll',
+ True,
+ False,
+ False,
+ [],
+ None,
+ None,
+ None)
